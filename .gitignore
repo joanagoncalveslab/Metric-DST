@@ -187,3 +187,7 @@ cython_debug/
 
 ### own ignores ###
 MNIST/
+*.png
+*.jpg
+*.jpeg
+*.csv
