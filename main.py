@@ -1,4 +1,4 @@
-from example import main
+import neuralnetwork
 
 if __name__ == '__main__':
-    main()
+    neuralnetwork.main()

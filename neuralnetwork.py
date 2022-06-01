@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import customDataset
 import pandas as pd
 
-# from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, roc_auc_score, accuracy_score, precision_recall_curve, auc, f1_score, average_precision_score
 
 if platform.system() == 'Windows':
     webDriveFolder = "W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/"
@@ -52,44 +52,47 @@ def train_round(model, data_loader, device, optimizer, loss_func, epoch):
             )
     return total_loss/len(data_loader.dataset)
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, last_round):
     model.eval()
     test_loss = 0
     correct = 0
-    # y_pred = []
-    # y_true = []
+    y_pred = torch.zeros(0, dtype=torch.long, device='cpu')
+    y_true = torch.zeros(0, dtype=torch.long, device='cpu')
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            # y_true.extend(target.cpu())
+            y_true = torch.cat([y_true, target.view(-1).cpu()])
             output = model(data)
             test_loss += F.binary_cross_entropy(torch.squeeze(output), target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-            # y_pred.extend(pred.cpu())
+            y_pred = torch.cat([y_pred, pred.view(-1).cpu()])
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
+    if last_round:
+        classes = ['negative', 'positive']
+        cf_matrix = confusion_matrix(y_true, y_pred)
+        df_cm = pd.DataFrame(cf_matrix/np.sum(cf_matrix), index=classes, columns=classes)
+        df_cm.to_csv(outputFolder + 'confusion_matrix.csv')
+    precission, recall, threshholds = precision_recall_curve(y_true, y_pred)
+    auprc = auc(precission, recall)
+    auroc = roc_auc_score(y_true, y_pred)
+    accuracy = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred)
+    average_precision = average_precision_score(y_true, y_pred)
 
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
-    return test_loss
-
-    # classes = ['negative', 'positive']
-    # cf_matrix = confusion_matrix(y_true, y_pred)
-    # df_cm = pd.DataFrame(cf_matrix/np.sum(cf_matrix), index=classes, columns=classes)
-    # plt.figure(figsize = (12,7))
-    # sn.heatmap(df_cm, annot=True)
-    # plt.savefig('output.png')
-    # plt.show()
+    return [test_loss, auprc, auroc, accuracy, f1, average_precision]
 
 def train(model, train_loader, test_loader, device, optimizer, loss_func, num_epochs):
-    loss = []
-    tr_loss = []
+    metrics = []
     for epoch in range(1, num_epochs + 1):
-        tr_loss.append(train_round(model, train_loader, device, optimizer, loss_func, epoch))
-        loss.append(test(model, device, test_loader))
-    df = pd.DataFrame(data=zip(loss, tr_loss), columns=['loss', 'train_loss'])
+        tr_loss = train_round(model, train_loader, device, optimizer, loss_func, epoch)
+        test_metrics = test(model, device, test_loader, num_epochs==epoch)
+        metrics.append([tr_loss, *test_metrics])
+    df = pd.DataFrame(data=metrics, columns=['train_loss', 'test_loss', 'auprc', 'auroc', 'accuracy', 'f1', 'average_precision'])
     df.to_csv(outputFolder + "performance.csv")
 
 def get_data(path):
@@ -105,7 +108,7 @@ def main():
     device = torch.device(device)
 
     batch_size = 256
-    num_epochs = 50
+    num_epochs = 1
 
     train_dataset = get_data(webDriveFolder + "feature_sets/train_seq_128.csv")
     train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -116,7 +119,6 @@ def main():
     model = Net(train_dataset.data.shape[1]).to(device)
     loss_func = torch.nn.BCELoss(reduction='sum')
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-
 
     train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs)
 
