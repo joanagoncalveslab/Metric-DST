@@ -18,5 +18,14 @@ def create_confusion_matrix(path):
     plt.savefig('output.png')
     plt.show()
 
+def create_fold_convergence_graph(location):
+    df = pd.read_csv(location, index_col=0)
+    print(df.head())
+    sn.set_theme()
+    sn.lineplot(data=df, x="epoch", y='train_loss')
+    sn.lineplot(data=df, x="epoch", y='test_loss')
+    plt.show()
+
 if __name__=="__main__":
-    create_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/performance-logistic-regression-bce-2.csv")
+    # create_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/performance-logistic-regression-bce-2.csv")
+    create_fold_convergence_graph('experiment-0/performance.csv')
