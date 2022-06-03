@@ -19,7 +19,7 @@ def init_argparse() -> argparse.ArgumentParser:
         description="Run neuralnetwork"
     )
     parser.add_argument("-t", "--testset")
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-epochs", type=int, default=1)
     parser.add_argument("-l", "--layers", type=int, nargs='*', default=[])
     parser.add_argument('-C', '--cancer', choices=['BRCA', 'CESC', 'COAD', 'KIRC', 'LAML', 'LUAD', 'SKCM', 'OV'])
@@ -60,5 +60,8 @@ if __name__ == '__main__':
     dataset = pd.read_csv(dataPath).fillna(0)
     if args.cancer is not None:
         dataset = dataset[dataset['cancer']==args.cancer]
+
+    # class_major, class_minor = dataset['class'].value_counts()
+
 
     neuralnetwork.main(outputPath=outputFolder, dataset=dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=args.layers)
