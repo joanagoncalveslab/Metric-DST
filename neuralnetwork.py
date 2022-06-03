@@ -1,3 +1,4 @@
+from os import pathsep
 import platform
 import numpy as np
 import torch
@@ -15,6 +16,31 @@ if platform.system() == 'Windows':
 else:
     webDriveFolder = "/tudelft.net/staff-umbrella/JGMasters/2122-mathijs-de-wolf/"
     outputFolder = "/tudelft.net/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/"
+
+class EarlyStop():
+    def __init__(self, patience=5, delta=0):
+        self.patience = patience
+        self.delta = delta
+        self.min_val_loss = np.Inf
+        self.counter = 0
+        self.early_stop = False
+        self.model_state = None
+
+    def __call__(self, val_loss, model):
+        if val_loss < self.min_val_loss - self.delta:
+            self.min_val_loss = val_loss
+            self.counter = 0
+            self.save_checkpoint(model)
+        else:
+            self.counter+=1
+            if self.counter > self.patience:
+                self.early_stop = True
+
+    def save_checkpoint(self, model):
+        self.model_state = model.state_dict()
+
+    def load_checkpoint(self):
+        return self.model_state
 
 class Net(nn.Module):
     def __init__(self, layers):
@@ -85,10 +111,15 @@ def test_epoch(model, device, test_loader, last_round, loss_func):
 
 def train(model, train_loader, test_loader, device, optimizer, loss_func, num_epochs, fold):
     metrics = []
+    early_stop = EarlyStop(10)
     for epoch in range(1, num_epochs + 1):
         tr_loss = train_epoch(model, train_loader, device, optimizer, loss_func, epoch)
         test_metrics = test_epoch(model, device, test_loader, num_epochs==epoch, loss_func)
         metrics.append([epoch, fold, tr_loss, *test_metrics])
+        early_stop(test_metrics[0], model)
+        if early_stop.early_stop:
+            print(f"Early stop after epoch: {epoch}")
+            break
     df = pd.DataFrame(data=metrics, columns=['epoch', 'fold', 'train_loss', 'test_loss', 'auprc', 'auroc', 'accuracy', 'f1', 'average_precision'])
     return df
 
