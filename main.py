@@ -23,6 +23,7 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument("--num-epochs", type=int, default=1)
     parser.add_argument("-l", "--layers", type=int, nargs='*', default=[])
     parser.add_argument('-C', '--cancer', choices=['BRCA', 'CESC', 'COAD', 'KIRC', 'LAML', 'LUAD', 'SKCM', 'OV'])
+    parser.add_argument("-B", "--balance", action="store_true")
     parser.add_argument("file")
     return parser
 
@@ -54,14 +55,20 @@ if __name__ == '__main__':
             'cancer: '+str(args.cancer),
             'layers: '+' '.join([str(x) for x in layers])
         ]))
-    
-    
+
+    # iter_csv = pd.read_csv(dataPath, chunksize=1000)
+    # dataset = pd.concat([chunk[chunk['cancer']==args.cancer] for chunk in iter_csv]).fillna(0)
     
     dataset = pd.read_csv(dataPath).fillna(0)
     if args.cancer is not None:
         dataset = dataset[dataset['cancer']==args.cancer]
+    
+    if args.balance:
+        index = dataset['class'].value_counts()
+        
+        major_class = dataset[dataset['class']==index.index[0]]
+        minor_class = dataset[dataset['class']==index.index[1]]
 
-    # class_major, class_minor = dataset['class'].value_counts()
-
+        dataset = pd.concat([major_class.sample(index.values[1], replace=False), minor_class], ignore_index=True)
 
     neuralnetwork.main(outputPath=outputFolder, dataset=dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=args.layers)
