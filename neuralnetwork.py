@@ -19,8 +19,8 @@ else:
 class Net(nn.Module):
     def __init__(self, layers):
         super(Net, self).__init__()
-        self.layers = nn.ModuleList([nn.LazyLinear(x, bias=True) for x in layers])
-        self.finalLayer = nn.LazyLinear(1, bias=True)
+        self.layers = nn.ModuleList([nn.Linear(layers[i], layers[i+1], bias=True) for i in range(len(layers)-1)])
+        self.finalLayer = nn.Linear(layers[-1], 1, bias=True)
 
     def forward(self, x):
         for layer in self.layers:
@@ -131,7 +131,7 @@ def noCrossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, 0)
 
-def main(outputPath, dataset, testset=None, batch_size=128, num_epochs=1, layers=[]):
+def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batch_size=128, num_epochs=1):
     global outputFolder
     outputFolder = outputPath
 
@@ -142,6 +142,8 @@ def main(outputPath, dataset, testset=None, batch_size=128, num_epochs=1, layers
     loss_func = torch.nn.BCELoss()
 
     tr_dataset = create_customDataset(dataset)
+    layers = [tr_dataset.data.shape[1]] + layers
+
     # noCrossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size)
     crossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size)
 
