@@ -22,10 +22,21 @@ def create_fold_convergence_graph(location):
     df = df[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]]
     df = df.melt('epoch', var_name='cols', value_name='vals')
     sn.set_theme()
-    sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci='sd')
-    plt.show()
+    sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci=95)
+    plt.savefig('performance-l-16-0.png')
+    # plt.show()
+
+def calculate(location):
+    df=pd.read_csv(location, index_col=0)
+    df = df[df['epoch']==75]
+    print(df.mean())
 
 if __name__=="__main__":
-    # create_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/performance-logistic-regression-bce-2.csv")
-    create_fold_convergence_graph('experiment-3/performance.csv')
+    # create_fold_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-l-16-0/performance.csv")
+    # create_fold_convergence_graph('experiment-6/performance.csv')
     # create_confusion_matrix('experiment-5/confusion_matrix.csv')
+    calculate("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-0/performance.csv")
+    calculate("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-l-2-0/performance.csv")
+    calculate("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-l-4-0/performance.csv")
+    calculate("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-l-8-0/performance.csv")
+    calculate("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-l-16-0/performance.csv")

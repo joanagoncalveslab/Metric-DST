@@ -24,6 +24,7 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument("-l", "--layers", type=int, nargs='*', default=[])
     parser.add_argument('-C', '--cancer', choices=['BRCA', 'CESC', 'COAD', 'KIRC', 'LAML', 'LUAD', 'SKCM', 'OV'])
     parser.add_argument("-B", "--balance", action="store_true")
+    parser.add_argument("--output-file", type=str, default="experiment-")
     parser.add_argument("file")
     return parser
 
@@ -40,20 +41,22 @@ if __name__ == '__main__':
     layers = [x for x in args.layers if x > 0]
 
     i = 0
-    while os.path.exists(outputFolder + "experiment-%s" % i):
+    while os.path.exists(outputFolder + args.output_file + str(i)):
         i += 1
-    outputFolder = outputFolder + "experiment-%s/" % i
+    outputFolder = outputFolder + args.output_file + str(i) + '/'
     os.mkdir(outputFolder)
 
     with open(outputFolder + 'settings.txt', 'a') as f:
         f.write('\n'.join([
-            'experiment-'+str(i),
+            args.output_file+str(i),
             'number of epochs: '+str(args.num_epochs),
             'batch size: '+str(args.batch_size),
             'trainingset: '+args.file,
             'testset: '+str(args.testset),
             'cancer: '+str(args.cancer),
-            'layers: '+' '.join([str(x) for x in layers])
+            'layers: '+' '.join([str(x) for x in layers]),
+            'balanced: '+str(args.balance),
+            'with dropout of 0.5'
         ]))
 
     # iter_csv = pd.read_csv(dataPath, chunksize=1000)

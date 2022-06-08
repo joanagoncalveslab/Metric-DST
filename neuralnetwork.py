@@ -1,4 +1,3 @@
-from os import pathsep
 import platform
 import numpy as np
 import torch
@@ -42,16 +41,22 @@ class EarlyStop():
     def load_checkpoint(self):
         return self.model_state
 
+def layer(in_f, out_f, *args, **kwargs):
+    return nn.Sequential(
+        nn.Linear(in_f, out_f, *args, **kwargs),
+        nn.Sigmoid(),
+        nn.Dropout(p=0.5)
+    )
+
 class Net(nn.Module):
     def __init__(self, layers):
         super(Net, self).__init__()
-        self.layers = nn.ModuleList([nn.Linear(layers[i], layers[i+1], bias=True) for i in range(len(layers)-1)])
+        self.layers = nn.ModuleList([layer(layers[i], layers[i+1], bias=True) for i in range(len(layers)-1)])
         self.finalLayer = nn.Linear(layers[-1], 1, bias=True)
 
     def forward(self, x):
         for layer in self.layers:
             x = layer(x)
-            x = torch.sigmoid(x)
         x = self.finalLayer(x)
         x = torch.sigmoid(x)
         return x
@@ -111,15 +116,15 @@ def test_epoch(model, device, test_loader, last_round, loss_func):
 
 def train(model, train_loader, test_loader, device, optimizer, loss_func, num_epochs, fold):
     metrics = []
-    early_stop = EarlyStop(10)
+    # early_stop = EarlyStop(10)
     for epoch in range(1, num_epochs + 1):
         tr_loss = train_epoch(model, train_loader, device, optimizer, loss_func, epoch)
         test_metrics = test_epoch(model, device, test_loader, num_epochs==epoch, loss_func)
         metrics.append([epoch, fold, tr_loss, *test_metrics])
-        early_stop(test_metrics[0], model)
-        if early_stop.early_stop:
-            print(f"Early stop after epoch: {epoch}")
-            break
+        # early_stop(test_metrics[0], model)
+        # if early_stop.early_stop:
+        #     print(f"Early stop after epoch: {epoch}")
+        #     break
     df = pd.DataFrame(data=metrics, columns=['epoch', 'fold', 'train_loss', 'test_loss', 'auprc', 'auroc', 'accuracy', 'f1', 'average_precision'])
     return df
 
