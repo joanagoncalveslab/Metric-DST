@@ -7,7 +7,7 @@ import customDataset
 import pandas as pd
 
 from sklearn.metrics import confusion_matrix, roc_auc_score, accuracy_score, precision_recall_curve, auc, f1_score, average_precision_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import StratifiedKFold
 
 if platform.system() == 'Windows':
     webDriveFolder = "W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/"
@@ -97,12 +97,12 @@ def test_epoch(model, device, test_loader, last_round, loss_func):
             y_pred = torch.cat([y_pred, pred.view(-1).cpu()])
 
     test_loss /= len(test_loader.sampler)
-    if last_round:
-        classes = ['negative', 'positive']
-        cf_matrix = confusion_matrix(y_true, y_pred)
-        # df_cm = pd.DataFrame(cf_matrix/np.sum(cf_matrix), index=classes, columns=classes)
-        df_cm = pd.DataFrame(cf_matrix, index=classes, columns=classes)
-        df_cm.to_csv(outputFolder + 'confusion_matrix.csv')
+    # if last_round:
+    #     classes = ['negative', 'positive']
+    #     cf_matrix = confusion_matrix(y_true, y_pred)
+    #     # df_cm = pd.DataFrame(cf_matrix/np.sum(cf_matrix), index=classes, columns=classes)
+    #     df_cm = pd.DataFrame(cf_matrix, index=classes, columns=classes)
+    #     df_cm.to_csv(outputFolder + 'confusion_matrix.csv')
     precision, recall, _ = precision_recall_curve(y_true, y_prob)
     auprc = auc(recall, precision)
     auroc = roc_auc_score(y_true, y_prob)
@@ -141,20 +141,22 @@ def create_customDataset(data):
     dataset = customDataset.CustomDataset(torch.Tensor(features.values.astype(np.float64)), torch.Tensor(labels.values.astype(np.float64)))
     return dataset
 
-def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size):
+def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size, seed):
     df = pd.DataFrame()
-    splits = KFold(5)
-    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)))):
+    splits = StratifiedKFold(5, shuffle=True, random_state=seed)
+    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)), dataset.labels)):
         print("fold: {}".format(fold))
-        train_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(train_idx))
-        test_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(val_idx))
+        g_train = torch.Generator().manual_seed(seed+fold)
+        g_val = torch.Generator().manual_seed(seed+fold)
+        train_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.RandomSampler(train_idx, generator=g_train))
+        test_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.RandomSampler(val_idx, generator=g_val))
 
         model = Net(layers).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
         result = train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, fold)
         df = pd.concat([df, result], ignore_index=True, sort=False)
 
-    df.to_csv(outputFolder + "performance.csv")
+    df.to_csv(outputFolder + "performance" + (str(layers[1]) if len(layers) > 1 else str(0)) + ".csv")
 
 def noCrossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size):
     train_dataset = get_data(webDriveFolder + "feature_sets/train_seq_128.csv")
@@ -167,7 +169,7 @@ def noCrossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, 0)
 
-def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batch_size=128, num_epochs=1):
+def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batch_size=128, num_epochs=1, seed=42):
     global outputFolder
     outputFolder = outputPath
 
@@ -181,7 +183,7 @@ def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batc
     layers = [tr_dataset.data.shape[1]] + layers
 
     # noCrossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size)
-    crossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size)
+    crossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size, seed)
 
 if __name__ == "__main__":
     main()
