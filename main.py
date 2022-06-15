@@ -38,6 +38,7 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument("-B", "--balance", action="store_true")
     parser.add_argument("--output-file", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("file")
     return parser
 
@@ -62,7 +63,7 @@ if __name__ == '__main__':
             i += 1
         outputFolder = outputFolder + outputFile + str(i) + '/'
 
-    time.sleep(random.randint(10, 100))
+    time.sleep(random.random())
 
     if not os.path.exists(outputFolder):
         os.mkdir(outputFolder)
@@ -78,6 +79,8 @@ if __name__ == '__main__':
             'layers: '+' '.join([str(x) for x in layers]),
             'balanced: '+str(args.balance),
             'with dropout of 0.5',
+            'learning rate: '+str(args.lr),
+            'seed: '+str(args.seed),
             ''
         ]))
 
@@ -101,4 +104,4 @@ if __name__ == '__main__':
         np.random.shuffle(idx)
         dataset = dataset.loc[idx]
 
-    neuralnetwork.main(outputPath=outputFolder, dataset=dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=layers, seed=args.seed)
+    neuralnetwork.main(outputPath=outputFolder, dataset=dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=layers, seed=args.seed, learning_rate=args.lr)

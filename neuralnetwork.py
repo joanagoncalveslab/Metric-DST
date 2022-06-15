@@ -68,7 +68,7 @@ def train_epoch(model, data_loader, device, optimizer, loss_func, epoch):
         data, labels = data.to(device), labels.to(device)
         optimizer.zero_grad()
         embeddings = model(data)
-        loss = loss_func(torch.squeeze(embeddings), labels)
+        loss = loss_func(torch.squeeze(embeddings), torch.squeeze(labels))
         total_loss += loss.item()*data.size(0)
         loss.backward()
         optimizer.step()
@@ -92,7 +92,7 @@ def test_epoch(model, device, test_loader, last_round, loss_func):
             y_true = torch.cat([y_true, target.view(-1).cpu()])
             output = model(data)
             y_prob = torch.cat([y_prob, output.view(-1).cpu()])
-            test_loss += loss_func(torch.squeeze(output), target).item()*data.size(0)
+            test_loss += loss_func(torch.squeeze(output), torch.squeeze(target)).item()*data.size(0)
             pred = output.round()
             y_pred = torch.cat([y_pred, pred.view(-1).cpu()])
 
@@ -141,18 +141,22 @@ def create_customDataset(data):
     dataset = customDataset.CustomDataset(torch.Tensor(features.values.astype(np.float64)), torch.Tensor(labels.values.astype(np.float64)))
     return dataset
 
-def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size, seed):
+def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size, seed, learning_rate):
     df = pd.DataFrame()
     splits = StratifiedKFold(5, shuffle=True, random_state=seed)
     for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)), dataset.labels)):
         print("fold: {}".format(fold))
+
+        # TODO: Sample here!
+        # Just undersample the training and validation set
+
         g_train = torch.Generator().manual_seed(seed+fold)
         g_val = torch.Generator().manual_seed(seed+fold)
-        train_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.RandomSampler(train_idx, generator=g_train))
-        test_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.RandomSampler(val_idx, generator=g_val))
+        train_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(train_idx, generator=g_train))
+        test_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(val_idx, generator=g_val))
 
         model = Net(layers).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         result = train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, fold)
         df = pd.concat([df, result], ignore_index=True, sort=False)
 
@@ -169,7 +173,7 @@ def noCrossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, 0)
 
-def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batch_size=128, num_epochs=1, seed=42):
+def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batch_size=128, num_epochs=1, seed=42, learning_rate=0.1):
     global outputFolder
     outputFolder = outputPath
 
@@ -183,7 +187,7 @@ def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batc
     layers = [tr_dataset.data.shape[1]] + layers
 
     # noCrossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size)
-    crossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size, seed)
+    crossvalidation(layers, device, loss_func, num_epochs, tr_dataset, batch_size, seed, learning_rate)
 
 if __name__ == "__main__":
     main()
