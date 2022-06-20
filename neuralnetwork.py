@@ -141,14 +141,23 @@ def create_customDataset(data):
     dataset = customDataset.CustomDataset(torch.Tensor(features.values.astype(np.float64)), torch.Tensor(labels.values.astype(np.float64)))
     return dataset
 
+def undersample(idx, labels):
+    idx_0 = [id for id in idx if labels[id]==0]
+    idx_1 = [id for id in idx if labels[id]==1]
+    if len(idx_0) < len(idx_1):
+        idx_1 = np.random.choice(idx_1, len(idx_0), replace=False)
+    if len(idx_0) > len(idx_1):
+        idx_0 = np.random.choice(idx_0, len(idx_1), replace=False)
+    return np.concatenate([idx_0, idx_1])
+
 def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size, seed, learning_rate):
     df = pd.DataFrame()
     splits = StratifiedKFold(5, shuffle=True, random_state=seed)
     for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dataset)), dataset.labels)):
         print("fold: {}".format(fold))
 
-        # TODO: Sample here!
-        # Just undersample the training and validation set
+        train_idx = undersample(train_idx, dataset.labels)
+        val_idx = undersample(val_idx, dataset.labels)
 
         g_train = torch.Generator().manual_seed(seed+fold)
         g_val = torch.Generator().manual_seed(seed+fold)
