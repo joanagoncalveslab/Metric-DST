@@ -86,9 +86,6 @@ if __name__ == '__main__':
         ]))
 
     setup_seed(args.seed)
-
-    # iter_csv = pd.read_csv(dataPath, chunksize=1000)
-    # dataset = pd.concat([chunk[chunk['cancer']==args.cancer] for chunk in iter_csv]).fillna(0)
     
     dataset = pd.read_csv(dataPath).fillna(0)
     if args.cancer is not None:
