@@ -35,7 +35,6 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument("--num-epochs", type=int, default=1)
     parser.add_argument("-l", "--layers", type=int, nargs='*', default=[])
     parser.add_argument('-C', '--cancer', choices=['BRCA', 'CESC', 'COAD', 'KIRC', 'LAML', 'LUAD', 'SKCM', 'OV'])
-    parser.add_argument("-B", "--balance", action="store_true")
     parser.add_argument("--output-file", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=0.01)
@@ -68,6 +67,9 @@ if __name__ == '__main__':
     if not os.path.exists(outputFolder):
         os.mkdir(outputFolder)
 
+    if args.lr > 1:
+        args.lr = 1 / args.lr
+
     with open(outputFolder + 'settings.txt', 'a') as f:
         f.write('\n'.join([
             outputFolder,
@@ -77,7 +79,6 @@ if __name__ == '__main__':
             'testset: '+str(args.testset),
             'cancer: '+str(args.cancer),
             'layers: '+' '.join([str(x) for x in layers]),
-            'balanced: '+str(args.balance),
             'with dropout of 0.5',
             'learning rate: '+str(args.lr),
             'seed: '+str(args.seed),
@@ -92,16 +93,5 @@ if __name__ == '__main__':
     dataset = pd.read_csv(dataPath).fillna(0)
     if args.cancer is not None:
         dataset = dataset[dataset['cancer']==args.cancer]
-
-    if args.balance:
-        index = dataset['class'].value_counts()
-
-        major_class = dataset[dataset['class']==index.index[0]].index
-        minor_class = dataset[dataset['class']==index.index[1]].index
-
-        sampled_major_class = np.random.choice(major_class, index.values[1], replace=False)
-        idx = np.concatenate([sampled_major_class, minor_class])
-        np.random.shuffle(idx)
-        dataset = dataset.loc[idx]
 
     neuralnetwork.main(outputPath=outputFolder, dataset=dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=layers, seed=args.seed, learning_rate=args.lr)

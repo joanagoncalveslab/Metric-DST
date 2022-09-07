@@ -17,49 +17,83 @@ def create_confusion_matrix(path):
     # plt.savefig('output.png')
     plt.show()
 
-def create_fold_convergence_graph(location):
+def create_fold_convergence_graph(location, folder):
     df = pd.read_csv(location, index_col=0)
-    df = df[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]]
+    # df = df[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]]
+    df = df[["epoch", "train_loss", "test_loss", "mean_average_precision_at_r", 'test_reference']]
     df = df.melt('epoch', var_name='cols', value_name='vals')
     sn.set_theme()
     sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci=95)
-    # plt.savefig('performance-l-16-0.png')
-    plt.show()
+    plt.savefig(folder+'performance.png')
+    # plt.show()
 
 def calculate(location):
     df=pd.read_csv(location, index_col=0)
     df = df[df['epoch']==75]
     print(df.mean())
 
-def create_facet_grid(data, outputfile):
+def near(y_label, existing_labels):
+    for label in existing_labels:
+        if abs(y_label - label) < 0.05:
+            return True
+    return False
+
+def create_facet_grid(data=pd.DataFrame, outputfile=str):
     sn.set_theme()
-    g=sn.FacetGrid(data, col='hidden nodes', col_wrap=3)
-    g.map(sn.lineplot, 'epoch', 'vals', 'cols')
-    g.add_legend()
-    plt.savefig(outputfile+".png")
+    # Use relplot
+    # g=sn.FacetGrid(data, col='hidden nodes', col_wrap=3)
+    # g.map(sn.lineplot, 'epoch', 'vals', 'cols')
+
+    gr = data[data['epoch']==100].groupby(['hidden nodes', 'cols'])
+    means = gr.std()
+    stds = gr.mean()
+    print(means)
+    print(stds)
+
+    # for hidden_node, axis in g.axes_dict.items():
+    #     present_labels = []
+    #     for l in axis.lines:
+    #         if l.get_label() in ['accuracy', 'average_precision', 'auroc']:
+    #             label_y = gr.mean().loc[(hidden_node, l.get_label()),('vals')]
+    #             print(near(label_y, present_labels))
+    #             present_labels.append(label_y)
+    #             axis.annotate(
+    #                 f"{means.loc[(hidden_node, l.get_label()),('vals')]:.2f}({stds.loc[(hidden_node, l.get_label()),('vals')]:.2f})", 
+    #                 xy=(1,label_y), 
+    #                 xycoords=('axes fraction', 'data'),
+    #                 ha='left', 
+    #                 va='center', 
+    #                 color=l.get_color()
+    #             )
+
+
+    # g.add_legend()
+    # plt.savefig(outputfile+".png")
     # plt.show()
 
 if __name__=="__main__":
     # create_fold_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-l-16-0/performance.csv")
-    # create_fold_convergence_graph('experiment-BRCA/performance0.csv')
+    experiment = 'experiment-3/'
+    create_fold_convergence_graph(experiment+'performance0.csv', experiment)
     # create_confusion_matrix('experiment-5/confusion_matrix.csv')
     # experiment="OV-64"
-    for experiment in ["BRCA-64-0.005", "BRCA-64-0.05"]:
-        print(experiment)
-        file = "W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-"+experiment+"/"
-        # file = "experiment-OV-16/"
-        df1 = pd.read_csv(file+"performance0.csv")[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
-        df1.insert(3, 'hidden nodes', 0)
-        df2 = pd.read_csv(file+"performance2.csv")[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
-        df2.insert(3, 'hidden nodes', 2)
-        df3 = pd.read_csv(file+"performance4.csv")[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
-        df3.insert(3, 'hidden nodes', 4)
-        df4 = pd.read_csv(file+"performance8.csv")[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
-        df4.insert(3, 'hidden nodes', 8)
-        df5 = pd.read_csv(file+"performance16.csv")[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
-        df5.insert(3, 'hidden nodes', 16)
-        df6 = pd.read_csv(file+"performance32.csv")[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
-        df6.insert(3, 'hidden nodes', 32)
-        conc = pd.concat([df1, df2, df3, df4, df5, df6])
-        create_facet_grid(conc, "png-"+experiment)
-    print("DONE")
+
+    # for experiment in ["BRCA-64-0.01-ml", "CESC-32-0.01-ml", "OV-32-0.01-ml"]:
+    #     print(experiment)
+    #     file = "W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-"+experiment+"/"
+    #     # file = "experiment-"+experiment+"/"
+    #     # df1 = pd.read_csv(file+"performance0.csv")[["epoch", "train_loss", "test_loss", "auroc", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
+    #     # df1.insert(3, 'hidden nodes', 0)
+    #     df2 = pd.read_csv(file+"performance2.csv")[["epoch", "train_loss", "test_loss", "auroc", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
+    #     df2.insert(3, 'hidden nodes', '2, 2')
+    #     df3 = pd.read_csv(file+"performance4.csv")[["epoch", "train_loss", "test_loss", "auroc", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
+    #     df3.insert(3, 'hidden nodes', '4, 2')
+    #     df4 = pd.read_csv(file+"performance8.csv")[["epoch", "train_loss", "test_loss", "auroc", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
+    #     df4.insert(3, 'hidden nodes', '8, 2')
+    #     # df5 = pd.read_csv(file+"performance16.csv")[["epoch", "train_loss", "test_loss", "auroc", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
+    #     # df5.insert(3, 'hidden nodes', 16)
+    #     # df6 = pd.read_csv(file+"performance32.csv")[["epoch", "train_loss", "test_loss", "auroc", "accuracy", "average_precision"]].melt('epoch', var_name='cols', value_name='vals')
+    #     # df6.insert(3, 'hidden nodes', 32)
+    #     conc = pd.concat([df4, df3, df2])
+    #     create_facet_grid(conc, "png-"+experiment)
+    # print("DONE")
