@@ -19,8 +19,7 @@ def create_confusion_matrix(path):
 
 def create_fold_convergence_graph(location, folder):
     df = pd.read_csv(location, index_col=0)
-    # df = df[["epoch", "train_loss", "test_loss", "auroc", "auprc", "f1", "accuracy", "average_precision"]]
-    df = df[["epoch", "train_loss", "test_loss", "mean_average_precision_at_r", 'test_reference']]
+    df = df[["epoch", "train_loss", "test_loss", "accuracy", "f1_score", "average_precision"]]
     df = df.melt('epoch', var_name='cols', value_name='vals')
     sn.set_theme()
     sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci=95)

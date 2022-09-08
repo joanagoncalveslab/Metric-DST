@@ -6,10 +6,8 @@ import torch.nn as nn
 import customDataset, customAccuracyCalculator
 import pandas as pd
 
-from sklearn.metrics import confusion_matrix, roc_auc_score, accuracy_score, precision_recall_curve, auc, f1_score, average_precision_score
 from sklearn.model_selection import StratifiedKFold
 from pytorch_metric_learning import distances, losses, miners, reducers, testers
-from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 
 import visualize
 import create_convergence_graph
@@ -25,23 +23,17 @@ def layer(in_f, out_f, *args, **kwargs):
     return nn.Sequential(
         nn.Linear(in_f, out_f, *args, **kwargs),
         nn.Sigmoid(),
-        nn.Dropout(p=0.5)
+        # nn.Dropout(p=0.5)
     )
 
 class Net(nn.Module):
     def __init__(self, layers):
         super(Net, self).__init__()
         self.layers = nn.ModuleList([layer(layers[i], layers[i+1], bias=True) for i in range(len(layers)-1)])
-        self.fc2 = nn.Linear(128, 8, bias=True)
-        self.fc1 = nn.Linear(8, 2, bias=True)
 
     def forward(self, x):
         for layer in self.layers:
             x = layer(x)
-        x = self.fc2(x)
-        x = torch.sigmoid(x)
-        x = self.fc1(x)
-        x = torch.sigmoid(x)
         return x
 
 def train_epoch(model, data_loader, device, optimizer, loss_func, mining_func, epoch):
@@ -101,22 +93,19 @@ def test_epoch_dml(model, train_loader, test_loader, accuracy_calculator, device
         test_embeddings, train_embeddings, test_labels, train_labels, False
     )
 
-    accuracies_test_reference = accuracy_calculator.get_accuracy(
-        test_embeddings, test_embeddings, test_labels, test_labels, True
-    )
     # print(
     #     "Test set accuracy (Precision@1) = {}".format(accuracies["precision_at_1"]))
     # print("Test set loss = {}".format(test_loss))
-    return [test_loss, accuracies["mean_average_precision_at_r"], accuracies_test_reference["mean_average_precision_at_r"]]
+    return [test_loss, accuracies["accuracy"], accuracies["f1_score"], accuracies["average_precision"]]
 
 def train(model, train_loader, test_loader, device, optimizer, loss_func, num_epochs, fold, mining_func, accuracy_calculator):
     metrics = []
-    # test_epoch_dml(model, train_loader, test_loader, accuracy_calculator, device, loss_func, True, fold, 0)
+    test_epoch_dml(model, train_loader=train_loader, test_loader=test_loader, accuracy_calculator=accuracy_calculator, device=device, loss_func=loss_func, visualize_bool=True, fold=fold, epoch=0)
     for epoch in range(1, num_epochs + 1):
         tr_loss = train_epoch(model, train_loader, device, optimizer, loss_func, mining_func, epoch)
         test_metrics = test_epoch_dml(model, train_loader=train_loader, test_loader=test_loader, accuracy_calculator=accuracy_calculator, device=device, loss_func=loss_func, visualize_bool=epoch in [1,2,3,4,5,6,7,8,9,10,num_epochs], fold=fold, epoch=epoch)
         metrics.append([epoch, fold, tr_loss, *test_metrics])
-    df = pd.DataFrame(data=metrics, columns=['epoch', 'fold', 'train_loss', 'test_loss', 'mean_average_precision_at_r', 'test_reference'])
+    df = pd.DataFrame(data=metrics, columns=['epoch', 'fold', 'train_loss', 'test_loss', 'accuracy', 'f1_score', 'average_precision'])
     return df
 
 def get_data(path):
@@ -156,6 +145,7 @@ def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size, 
             test_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(val_idx, generator=g_val))
 
             model = Net(layers).to(device)
+            print(model.layers)
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
             result = train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, fold, mining_func, accuracy_calculator=accuracy_calculator)
             df = pd.concat([df, result], ignore_index=True, sort=False)
@@ -176,7 +166,7 @@ def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batc
     loss_func = losses.TripletMarginLoss(margin=0.4, distance=distance, reducer=reducer)
     mining_func = miners.TripletMarginMiner(margin=0.2, distance=distance, type_of_triplets="all")
 
-    accuracy_calculator = customAccuracyCalculator.CustomCalculator(include=("mean_average_precision_at_r",), k=None)
+    accuracy_calculator = customAccuracyCalculator.CustomCalculator(include=("accuracy", "f1_score", "average_precision"), k=5)
 
     tr_dataset = create_customDataset(dataset)
     layers = [tr_dataset.data.shape[1]] + layers
