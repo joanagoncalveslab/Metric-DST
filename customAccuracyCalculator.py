@@ -19,11 +19,14 @@ class CustomCalculator(accuracy_calculator.AccuracyCalculator):
 
     def calculate_f1_score(self, knn_labels:Tensor, query_labels:Tensor, **kwargs):
         y_pred = knn_labels.mean(1).round()
-        return f1_score(query_labels, y_pred)
+        return f1_score(query_labels.cpu(), y_pred.cpu())
 
     def calculate_average_precision(self, knn_labels:Tensor, query_labels:Tensor, **kwargs):
         y_prob = knn_labels.mean(1)
-        return average_precision_score(query_labels, y_prob)
+        return average_precision_score(query_labels.cpu(), y_prob.cpu())
+
+    def calculate_auroc(self, knn_labels:Tensor, query_labels:Tensor, **kwargs):
+        return roc_auc_score(query_labels.cpu(), knn_labels.mean(1).cpu())
 
     def requires_knn(self):
-        return super().requires_knn() + ["precision_at_5", "accuracy_knn"]
+        return super().requires_knn() + ["precision_at_5", "accuracy", "f1_score", "average_precision", "auroc"]

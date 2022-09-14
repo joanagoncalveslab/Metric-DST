@@ -22,8 +22,7 @@ else:
 def layer(in_f, out_f, *args, **kwargs):
     return nn.Sequential(
         nn.Linear(in_f, out_f, *args, **kwargs),
-        nn.Sigmoid(),
-        # nn.Dropout(p=0.5)
+        nn.Sigmoid()
     )
 
 class Net(nn.Module):
@@ -43,9 +42,9 @@ def train_epoch(model, data_loader, device, optimizer, loss_func, mining_func, e
         data, labels = data.to(device), labels.to(device)
         optimizer.zero_grad()
         embeddings = model(data)
-        indices_tuple = mining_func(embeddings, labels)
-        loss = loss_func(torch.squeeze(embeddings), torch.squeeze(labels), indices_tuple)
-        # loss = loss_func(torch.squeeze(embeddings), torch.squeeze(labels))
+        # indices_tuple = mining_func(embeddings, labels)
+        # loss = loss_func(torch.squeeze(embeddings), torch.squeeze(labels), indices_tuple)
+        loss = loss_func(torch.squeeze(embeddings), torch.squeeze(labels))
         total_loss += loss.item()*data.size(0)
         loss.backward()
         optimizer.step()
@@ -96,16 +95,17 @@ def test_epoch_dml(model, train_loader, test_loader, accuracy_calculator, device
     # print(
     #     "Test set accuracy (Precision@1) = {}".format(accuracies["precision_at_1"]))
     # print("Test set loss = {}".format(test_loss))
-    return [test_loss, accuracies["accuracy"], accuracies["f1_score"], accuracies["average_precision"]]
+    return [test_loss, accuracies["accuracy"], accuracies["f1_score"], accuracies["average_precision"], accuracies['auroc']]
 
 def train(model, train_loader, test_loader, device, optimizer, loss_func, num_epochs, fold, mining_func, accuracy_calculator):
     metrics = []
     test_epoch_dml(model, train_loader=train_loader, test_loader=test_loader, accuracy_calculator=accuracy_calculator, device=device, loss_func=loss_func, visualize_bool=True, fold=fold, epoch=0)
     for epoch in range(1, num_epochs + 1):
         tr_loss = train_epoch(model, train_loader, device, optimizer, loss_func, mining_func, epoch)
-        test_metrics = test_epoch_dml(model, train_loader=train_loader, test_loader=test_loader, accuracy_calculator=accuracy_calculator, device=device, loss_func=loss_func, visualize_bool=epoch in [1,2,3,4,5,6,7,8,9,10,num_epochs], fold=fold, epoch=epoch)
+        # test_metrics = test_epoch_dml(model, train_loader=train_loader, test_loader=test_loader, accuracy_calculator=accuracy_calculator, device=device, loss_func=loss_func, visualize_bool=(epoch in [1,2,3,4,5,6,7,8,9,10,num_epochs] and fold==0), fold=fold, epoch=epoch)
+        test_metrics = test_epoch_dml(model, train_loader=train_loader, test_loader=test_loader, accuracy_calculator=accuracy_calculator, device=device, loss_func=loss_func, visualize_bool=False, fold=fold, epoch=epoch)
         metrics.append([epoch, fold, tr_loss, *test_metrics])
-    df = pd.DataFrame(data=metrics, columns=['epoch', 'fold', 'train_loss', 'test_loss', 'accuracy', 'f1_score', 'average_precision'])
+    df = pd.DataFrame(data=metrics, columns=['epoch', 'fold', 'train_loss', 'test_loss', 'accuracy', 'f1_score', 'average_precision', 'auroc'])
     return df
 
 def get_data(path):
@@ -145,7 +145,6 @@ def crossvalidation(layers, device, loss_func, num_epochs, dataset, batch_size, 
             test_data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(val_idx, generator=g_val))
 
             model = Net(layers).to(device)
-            print(model.layers)
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
             result = train(model, train_data_loader, test_data_loader, device, optimizer, loss_func, num_epochs, fold, mining_func, accuracy_calculator=accuracy_calculator)
             df = pd.concat([df, result], ignore_index=True, sort=False)
@@ -162,11 +161,12 @@ def main(outputPath: str, dataset:pd.DataFrame, layers: list, testset=None, batc
     device = torch.device(device)
 
     distance = distances.LpDistance(normalize_embeddings=False, p=2, power=1)
-    reducer = reducers.AvgNonZeroReducer()
+    reducer = reducers.MeanReducer()
     loss_func = losses.TripletMarginLoss(margin=0.4, distance=distance, reducer=reducer)
     mining_func = miners.TripletMarginMiner(margin=0.2, distance=distance, type_of_triplets="all")
+    # loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
-    accuracy_calculator = customAccuracyCalculator.CustomCalculator(include=("accuracy", "f1_score", "average_precision"), k=5)
+    accuracy_calculator = customAccuracyCalculator.CustomCalculator(include=("accuracy", "f1_score", "average_precision", "auroc"), k=5)
 
     tr_dataset = create_customDataset(dataset)
     layers = [tr_dataset.data.shape[1]] + layers
