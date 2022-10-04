@@ -31,13 +31,23 @@ def init_argparse() -> argparse.ArgumentParser:
         description="Run neuralnetwork"
     )
     parser.add_argument("-t", "--testset")
-    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-epochs", type=int, default=1)
     parser.add_argument("-l", "--layers", type=int, nargs='*', default=[])
     parser.add_argument('-C', '--cancer', choices=['BRCA', 'CESC', 'COAD', 'KIRC', 'LAML', 'LUAD', 'SKCM', 'OV'])
     parser.add_argument("--output-file", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=0.01)
+
+    parser.add_argument("--knn", type=int, default=5)
+    parser.add_argument("--miner", action='store_true')
+    parser.add_argument("--contrastive", action='store_true')
+    parser.add_argument("--exclude", type=str, default='')
+
+    parser.add_argument("--vis-genes", action='store_true')
+    parser.add_argument("--vis-embeddings", action='store_true')
+    parser.add_argument("--save-embeddings", action='store_true')
+
     parser.add_argument("file")
     return parser
 
@@ -79,9 +89,12 @@ if __name__ == '__main__':
             'testset: '+str(args.testset),
             'cancer: '+str(args.cancer),
             'layers: '+' '.join([str(x) for x in layers]),
-            'with dropout of 0.5',
             'learning rate: '+str(args.lr),
             'seed: '+str(args.seed),
+            'knn: '+str(args.knn),
+            'miner: '+str(args.miner),
+            'loss: '+('contrastive' if args.contrastive else 'triplet'),
+            'excluded gene: '+str(args.exclude),
             ''
         ]))
 
@@ -90,5 +103,16 @@ if __name__ == '__main__':
     dataset = pd.read_csv(dataPath).fillna(0)
     if args.cancer is not None:
         dataset = dataset[dataset['cancer']==args.cancer]
+    dataset = dataset[(dataset['seq1']!=-1.0) & (dataset['seq1']!=0.0)]
+    train_dataset = dataset[(dataset['gene1']!=args.exclude) & (dataset['gene2']!=args.exclude)]
+    test_dataset = dataset[(dataset['gene1']==args.exclude) | (dataset['gene2']==args.exclude)]
 
-    neuralnetwork.main(outputPath=outputFolder, dataset=dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=layers, seed=args.seed, learning_rate=args.lr)
+    flags = {
+        'visualize_genes': args.vis_genes,
+        'visualize_embeddings': args.vis_embeddings,
+        'save_embeddings': args.save_embeddings,
+        'miner': args.miner,
+        'contrastive': args.contrastive
+    }
+
+    neuralnetwork.main(outputPath=outputFolder, dataset=train_dataset, testset=test_dataset, num_epochs=args.num_epochs, batch_size=args.batch_size, layers=layers, seed=args.seed, learning_rate=args.lr, flags_in=flags, knn=args.knn)
