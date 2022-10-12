@@ -107,6 +107,17 @@ if __name__ == '__main__':
     train_dataset = dataset[(dataset['gene1']!=args.exclude) & (dataset['gene2']!=args.exclude)]
     test_dataset = dataset[(dataset['gene1']==args.exclude) | (dataset['gene2']==args.exclude)]
 
+    idx_0 = train_dataset[train_dataset['class'] == 0]
+    idx_1 = train_dataset[train_dataset['class'] == 1]
+    if len(idx_0) < len(idx_1):
+        idx_1 = idx_1.sample(len(idx_0))
+    if len(idx_0) > len(idx_1):
+        idx_0 = idx_0.sample(len(idx_1))
+    train_dataset = pd.concat([idx_0, idx_1])
+
+    train_dataset = pd.concat([train_dataset, test_dataset[test_dataset['class'] == 0].iloc[:40, :], test_dataset[test_dataset['class'] == 1].iloc[:10, :]])
+    test_dataset = pd.concat([test_dataset[test_dataset['class'] == 0].iloc[40:, :], test_dataset[test_dataset['class'] == 1].iloc[10:, :]])
+
     flags = {
         'visualize_genes': args.vis_genes,
         'visualize_embeddings': args.vis_embeddings,

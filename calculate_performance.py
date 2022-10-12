@@ -3,8 +3,8 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-performance = pd.read_csv("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-0.01-exclude-NARS2-noMiner-contrastive/performance.csv", index_col=0)
-test_performance = pd.read_csv("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-0.01-exclude-NARS2-noMiner-contrastive/performance-testset.csv", index_col=0)
+performance = pd.read_csv("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-0.01-noMiner-contrastive-exclude-partially-40-10-PARP1/performance.csv", index_col=0)
+test_performance = pd.read_csv("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-0.01-noMiner-contrastive-exclude-partially-40-10-PARP1/performance-testset.csv", index_col=0)
 
 performance = performance[(performance['epoch']==performance['epoch'].max())]
 performance = performance.iloc[:, 3:]

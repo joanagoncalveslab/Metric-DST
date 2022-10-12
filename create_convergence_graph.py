@@ -22,7 +22,7 @@ def create_fold_convergence_graph(location, folder):
     df = df[["epoch", "train_loss", "test_loss", "accuracy", "f1_score", "average_precision", "auroc"]]
     df = df.melt('epoch', var_name='cols', value_name='vals')
     sn.set_theme()
-    sn.lineplot(data=df, x="epoch", y='vals', hue='cols', errorbar=('ci', 95))
+    sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci=95)
     plt.savefig(folder+'performance.png')
     # plt.show()
 
