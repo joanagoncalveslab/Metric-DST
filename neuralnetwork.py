@@ -40,7 +40,7 @@ class Net(nn.Module):
 def train_epoch(model, data_loader, device, optimizer, loss_func, mining_func, epoch):
     model.train()
     total_loss = 0
-    for batch_idx, (data, labels, _) in enumerate(data_loader):
+    for batch_idx, (data, labels, _, _) in enumerate(data_loader):
         data, labels = data.to(device), labels.to(device)
         optimizer.zero_grad()
         embeddings = model(data)
@@ -61,7 +61,7 @@ def test_epoch_dml(model, train_loader, test_loader, accuracy_calculator, device
     test_embeddings = torch.zeros(0, dtype=torch.long, device='cpu')
     test_genes = []
     with torch.no_grad():
-        for data, target, (gene1, gene2) in test_loader:
+        for data, target, (gene1, gene2), _ in test_loader:
             data, target = data.to(device), target.to(device)
             test_genes.extend(list(zip(gene1, gene2)))
             test_labels = torch.cat([test_labels, target.cpu()])
@@ -73,7 +73,7 @@ def test_epoch_dml(model, train_loader, test_loader, accuracy_calculator, device
     train_embeddings = torch.zeros(0, dtype=torch.long, device='cpu')
     train_genes = []
     with torch.no_grad():
-        for data, target, (gene1, gene2) in train_loader:
+        for data, target, (gene1, gene2), _ in train_loader:
             data, target = data.to(device), target.to(device)
             train_genes.extend(list(zip(gene1, gene2)))
             train_labels = torch.cat([train_labels, target.cpu()])

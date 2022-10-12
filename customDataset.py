@@ -1,6 +1,8 @@
 from torch.utils.data import Dataset
 
 class CustomDataset(Dataset):
+    labels: list
+
     def __init__(self, data, labels, genes):
         self.data = data
         self.labels = labels
@@ -10,4 +12,4 @@ class CustomDataset(Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.data[idx], self.labels[idx], self.genes[idx]
+        return self.data[idx], self.labels[idx], self.genes[idx], idx
