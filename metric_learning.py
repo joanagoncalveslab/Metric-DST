@@ -145,25 +145,25 @@ class MetricLearning():
         def __init__(self) -> None:
             pass
 
-        def calculate_knn(self, from_embeddings, to_embeddings):
-            pairwise = cdist(from_embeddings, to_embeddings)
-
-            idx = np.argsort(pairwise.values, 1)[:, :5]
-            pass
-
         def get_accuracies(self, train_embeddings, train_labels, test_embeddings, test_labels):
             # Pairwise distances between test/validation embeddings as the rows and training embeddings as the columns
             pairwise = pd.DataFrame(
                 cdist(test_embeddings, train_embeddings, metric='euclidean')
             )
             # Get the indices of the columns with the largest distance to each row
-            idx = np.argsort(pairwise.values, 1)[:, :5]
+            sorted_pairwise = np.argsort(pairwise.values, 1)
+            idx = sorted_pairwise[:, :5]
             # Get the 5 nearest distances and labels
             knn_distances = np.array([[pairwise.iloc[i, j] for j in row] for i, row in enumerate(idx)])
+
+            max_distance = np.array([pairwise.iloc[i, j] for i, j in enumerate(sorted_pairwise[:, -1])])
+            max_distance[max_distance<1]=1
+            reshaped_distances = knn_distances / max_distance[:, np.newaxis]
+
             knn_labels = np.array([[train_labels[element] for element in row] for row in idx])
             # Calculate the weighted knn where the distance between the sample and nearest neighbour is subtracted from the neighbour label according to:
             # Label_k * (1 - |distance to k|) + (1 - label_k) * |distance to k|, where k represents the nearest neighbour k
-            weighted_knn_labels = knn_labels + ((1 - 2 * knn_labels) * knn_distances)
+            weighted_knn_labels = knn_labels + ((1 - 2 * knn_labels) * reshaped_distances)
 
             accuracy = np.equal(weighted_knn_labels.mean(1).round(), test_labels).astype(float).mean()
 

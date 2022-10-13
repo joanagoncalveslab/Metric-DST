@@ -81,13 +81,11 @@ if __name__ == '__main__':
         train_idx = undersample(train_idx, train_dataset.labels)
         val_idx = undersample(val_idx, train_dataset.labels)
 
-        print(len(train_idx))
-        print(len(val_idx))
-
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
         mining_func = miners.TripletMarginMiner(margin=0.2, distance=distance, type_of_triplets="all")
 
-        ntwrk = Network([128,8,2], loss_func, 0.01, device)
-        ml = SelfTraining(ntwrk, test_dataset, train_dataset, val_idx, train_idx, outputFolder)
+        ntwrk = Network([128,8,2], loss_func, 0.005, device)
+        ml = SelfTraining(ntwrk, test_dataset, train_dataset, train_idx, val_idx, outputFolder)
         ml.train(fold)
+        break
     create_convergence_graph.create_fold_convergence_graph(outputFolder + "performance.csv", outputFolder)

@@ -9,8 +9,10 @@ from sklearn.metrics import roc_auc_score, f1_score, average_precision_score
 
 import torch.utils.data
 
-from network import Network
-from typing import Sequence, Iterator
+from network import Network, Net
+from typing import OrderedDict, Sequence, Iterator
+
+from visualize import visualize_show
 
 def create_customDataset(data:pd.DataFrame) -> CustomDataset:
         features = data.iloc[:, 4:]
@@ -22,6 +24,15 @@ def create_customDataset(data:pd.DataFrame) -> CustomDataset:
             genes.values.tolist())
 
 class EarlyStop():
+    model:Net
+    model_state: OrderedDict[str, torch.Tensor]
+    patience: int
+    delta: float
+    min_val_loss: float
+    counter: int
+    early_stop: bool
+    best_epoch: int
+
     def __init__(self, patience=5, delta=0):
         self.patience = patience
         self.delta = delta
@@ -29,22 +40,32 @@ class EarlyStop():
         self.counter = 0
         self.early_stop = False
         self.model_state = None
+        self.best_epoch = 0
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, epoch):
         if val_loss < self.min_val_loss - self.delta:
             self.min_val_loss = val_loss
             self.counter = 0
             self.save_checkpoint(model)
+            self.best_epoch = epoch
         else:
             self.counter+=1
             if self.counter > self.patience:
                 self.early_stop = True
 
-    def save_checkpoint(self, model):
+    def save_checkpoint(self, model:Net):
         self.model_state = model.state_dict()
 
-    def load_checkpoint(self):
+    def load_checkpoint(self, model:Net):
+        model.load_state_dict(self.model_state)
         return self.model_state
+
+    def reset(self):
+        self.min_val_loss = np.Inf
+        self.counter = 0
+        self.early_stop = False
+        self.model_state = None
+        self.best_epoch = 0
 
 
 class SelfTraining():
@@ -55,6 +76,9 @@ class SelfTraining():
         self.network = network
         self.accuracyCalculator = self.AccuracyCalculator()
         self.outputFolder = outputFolder
+
+        print(f"Training size: {len(training_idx)}")
+        print(f"Unlabeled size: {len(unlabeled_idx)}")
 
         g_validation = torch.Generator().manual_seed(43)
         g_train = torch.Generator().manual_seed(42)
@@ -69,30 +93,47 @@ class SelfTraining():
     
     def train(self, fold) -> None:
         training_rounds = 100
-        early_stop = EarlyStop(10)
+        early_stop = EarlyStop()
         metrics = []
+        num_training_rounds = 0
         # Train initial model
         for epoch in range(training_rounds):
             training_loss = self.network.train(self.training_data_loader)
+            num_training_rounds += 1
             validation_loss, validation_embeddings, validation_labels, validation_genes = self.network.evaluate(self.validation_data_loader)
             train_embeddings, train_labels, train_genes = self.network.run(self.training_data_loader)
             accuracies = self.accuracyCalculator.get_accuracies(train_embeddings.numpy(), train_labels.numpy(), validation_embeddings.numpy(), validation_labels.numpy())
-            metrics.append([epoch, fold, training_loss, validation_loss, *accuracies])
-            early_stop(validation_loss, self.network.model)
+            metrics.append([num_training_rounds, fold, training_loss, validation_loss, *accuracies])
+            early_stop(validation_loss, self.network.model, num_training_rounds)
             if early_stop.early_stop:
                 print(f"Early stop after epoch: {epoch}")
+                early_stop.load_checkpoint(self.network.model)
                 break
 
         # Loop and add new samples
-        for loop in range(10):
+        stop_self_training = EarlyStop(patience=7)
+        for loop in range(100):
             self.find_sample_to_add()
-            for epoch in range(10):
+            stop_training_new_samples = EarlyStop(patience=10)
+            for epoch in range(100):
                 training_loss = self.network.train(self.training_data_loader)
+                num_training_rounds += 1
                 validation_loss, validation_embeddings, validation_labels, validation_genes = self.network.evaluate(self.validation_data_loader)
                 train_embeddings, train_labels, train_genes = self.network.run(self.training_data_loader)
                 accuracies = self.accuracyCalculator.get_accuracies(train_embeddings.numpy(), train_labels.numpy(), validation_embeddings.numpy(), validation_labels.numpy())
-                metrics.append([epoch+training_rounds+(loop*10), fold, training_loss, validation_loss, *accuracies])
-            # Evaluate if we made any progress for x number of rounds
+                metrics.append([num_training_rounds, fold, training_loss, validation_loss, *accuracies])
+                stop_training_new_samples(validation_loss, self.network.model, num_training_rounds)
+                if stop_training_new_samples.early_stop:
+                    print(f"Early stop after epoch: {epoch}")
+                    early_stop.load_checkpoint(self.network.model)
+                    break
+            validation_loss, _, _, _ = self.network.evaluate(self.validation_data_loader)
+            stop_self_training(validation_loss, self.network.model, num_training_rounds - 11)
+            if stop_self_training.early_stop:
+                print(f"Early stop after loop: {loop}")
+                early_stop.load_checkpoint(self.network.model)
+                print(f"Best model is: {stop_self_training.best_epoch}")
+                break
 
         pd.DataFrame(
             data=metrics, 
@@ -101,10 +142,9 @@ class SelfTraining():
 
     def find_sample_to_add(self):
         training_embeddings, training_labels, training_genes = self.network.run(self.training_data_loader)
-        unlabeled_embeddings, _, unlabeled_genes, unlabeled_idx = self.network.run_with_idx(self.unlabeled_data_loader)
+        unlabeled_embeddings, unlabeled_true_labels, unlabeled_genes, unlabeled_idx = self.network.run_with_idx(self.unlabeled_data_loader)
         unlabeled_idx  = np.array(unlabeled_idx)
         # Find dimension of output space
-        embeddings = list(zip(*training_embeddings))
         dimensions = []
         for dimension in zip(*training_embeddings):
             dimensions.append((min(dimension), max(dimension)))
@@ -132,7 +172,7 @@ class SelfTraining():
             weighted_knn_labels = knn_labels + np.multiply((1 - 2 * knn_labels), knn_distances.T).T
 
             confidence = weighted_knn_labels.mean()
-            if (confidence > 0.7 or confidence < 0.3) and selected_gene_id not in samples_to_add:
+            if (confidence > 0.8 or confidence < 0.2) and selected_gene_id not in samples_to_add:
                 if round(confidence) == 1 and sum(pseudolabels) < 5:
                     samples_to_add.append(selected_gene_id)
                     pseudolabels.append(round(confidence))
@@ -140,6 +180,8 @@ class SelfTraining():
                     samples_to_add.append(selected_gene_id)
                     pseudolabels.append(round(confidence))
         
+        visualize_show(training_embeddings, training_labels, [unlabeled_embeddings[x] for x in samples_to_add], [unlabeled_true_labels[x] for x in samples_to_add])
+
         # Transfer selected samples from unlabeled to labeled samples
         indices_of_samples_to_add = [unlabeled_idx[x] for x in samples_to_add]
         self.unlabeled_sampler.remove_indices(indices_of_samples_to_add)
