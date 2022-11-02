@@ -19,12 +19,23 @@ def create_confusion_matrix(path):
 
 def create_fold_convergence_graph(location, folder):
     df = pd.read_csv(location, index_col=0)
-    df = df[["epoch", "train_loss", "test_loss", "accuracy", "f1_score", "average_precision", "auroc"]]
+    df = df[["epoch", "train_loss", "validation_loss", "accuracy", "f1_score", "average_precision", "auroc"]]
     df = df.melt('epoch', var_name='cols', value_name='vals')
     sn.set_theme()
-    sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci=95)
+    sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci='sd')
     plt.savefig(folder+'performance.png')
     # plt.show()
+
+def create_fold_convergence_graph_individual_folds(location, folder):
+    df = pd.read_csv(location, index_col=0)
+    df = df[["epoch", "fold", "train_loss", "test_loss", "accuracy", "f1_score", "average_precision", "auroc"]]
+    df = df.melt(['epoch', 'fold'], var_name='cols', value_name='vals')
+    sn.set_theme()
+    g=sn.FacetGrid(df, col='fold', col_wrap=3)
+    g.map(sn.lineplot, 'epoch', 'vals', 'cols')
+    # sn.lineplot(data=df, x="epoch", y='vals', hue='cols', style='fold')
+    # plt.savefig(folder+'performance.png')
+    plt.show()
 
 def calculate(location):
     df=pd.read_csv(location, index_col=0)
@@ -37,7 +48,7 @@ def near(y_label, existing_labels):
             return True
     return False
 
-def create_facet_grid(data=pd.DataFrame, outputfile=str):
+def create_facet_grid(data:pd.DataFrame, outputfile:str):
     sn.set_theme()
     # Use relplot
     g=sn.FacetGrid(data, col='hidden nodes', col_wrap=2)
@@ -71,6 +82,8 @@ def create_facet_grid(data=pd.DataFrame, outputfile=str):
     plt.show()
 
 if __name__=="__main__":
+    create_fold_convergence_graph_individual_folds("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-6/complete_performance.csv", "")
+    exit()
     # create_fold_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-64-lr-0.01-ml/performance.csv")
 
     # experiment = "W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-64-0.01-LossMargin-0.4/"

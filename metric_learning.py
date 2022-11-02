@@ -1,32 +1,15 @@
-import platform
-import numpy as np
 import torch
-import torch.nn as nn
+import torch.utils.data
 
-from scipy.spatial.distance import squareform, cdist
-import customDataset, customAccuracyCalculator
+from scipy.spatial.distance import cdist
+import customDataset
 import pandas as pd
-from sklearn.metrics import confusion_matrix, roc_auc_score, accuracy_score, precision_recall_curve, auc, f1_score, average_precision_score
 
-
-from sklearn.model_selection import StratifiedKFold
-from pytorch_metric_learning import distances, losses, miners, reducers
-
-import create_convergence_graph
-import neuralnetwork
 from network import Network
-from typing import Sequence, Iterator
+from typing import Sequence
 
 from visualize import visualize, visualize_gene
-
-def create_customDataset(data:pd.DataFrame) -> customDataset.CustomDataset:
-        features = data.iloc[:, 4:]
-        labels = data["class"].astype('long')
-        genes = data.iloc[:, :2]
-        return customDataset.CustomDataset(
-            torch.Tensor(features.values.astype(np.float64)), 
-            torch.Tensor(labels.values.astype(np.float64)), 
-            genes.values.tolist())
+from metric_learning_utils import AccuracyCalculator, MySubsetRandomSampler
 
 class MetricLearning():
 
@@ -34,15 +17,15 @@ class MetricLearning():
 
     def __init__(self, network:Network, test_data:customDataset.CustomDataset, training_data:customDataset.CustomDataset, training_idx: Sequence[int], validation_idx: Sequence[int], outputFolder: str):
         self.network = network
-        self.accuracyCalculator = self.AccuracyCalculator()
+        self.accuracyCalculator = AccuracyCalculator()
         self.outputFolder = outputFolder
 
         g_test = torch.Generator().manual_seed(43)
         g_train = torch.Generator().manual_seed(42)
         g_validation = torch.Generator().manual_seed(42)
         test_sampler = torch.utils.data.RandomSampler(test_data, generator=g_test)
-        self.training_sampler = self.MySubsetRandomSampler(training_idx, g_train)
-        self.validation_sampler = self.MySubsetRandomSampler(validation_idx, g_validation)
+        self.training_sampler = MySubsetRandomSampler(training_idx, g_train)
+        self.validation_sampler = MySubsetRandomSampler(validation_idx, g_validation)
 
         self.test_data_loader = torch.utils.data.DataLoader(test_data, batch_size=64, sampler=test_sampler)
         self.training_data_loader = torch.utils.data.DataLoader(training_data, batch_size=64, sampler=self.training_sampler)
@@ -101,75 +84,3 @@ class MetricLearning():
         )
         test_df.to_csv(self.outputFolder+f'embeddings_test_fold_{fold}.csv')
         train_df.to_csv(self.outputFolder+f'embeddings_train_fold_{fold}.csv')
-
-    class MySubsetRandomSampler(torch.utils.data.Sampler[int]):
-        r"""Samples elements randomly from a given list of indices, without replacement.
-
-        Args:
-            indices (sequence): a sequence of indices
-            generator (Generator): Generator used in sampling.
-        """
-        indices: Sequence[int]
-
-        def __init__(self, indices: Sequence[int], generator=None) -> None:
-            self.indices = indices
-            self.generator = generator
-
-        def __iter__(self) -> Iterator[int]:
-            for i in torch.randperm(len(self.indices), generator=self.generator):
-                yield self.indices[i]
-
-        def __len__(self) -> int:
-            return len(self.indices)
-
-        def add_index(self, index: int) -> None:
-            indices = list(self.indices)
-            indices.append(index)
-            self.indices = indices
-
-        def add_indices(self, indices: Sequence[int]) -> None:
-            indices = list(self.indices)
-            indices.extend(indices)
-            self.indices = indices
-        
-        def remove_index(self, index: int) -> None:
-            indices = list(self.indices)
-            indices.remove(index)
-            self.indices = indices
-
-        def remove_indices(self, indices: Sequence[int]) -> None:
-            for index in indices:
-                self.remove_index(index)
-
-    class AccuracyCalculator():
-        def __init__(self) -> None:
-            pass
-
-        def get_accuracies(self, train_embeddings, train_labels, test_embeddings, test_labels):
-            # Pairwise distances between test/validation embeddings as the rows and training embeddings as the columns
-            pairwise = pd.DataFrame(
-                cdist(test_embeddings, train_embeddings, metric='euclidean')
-            )
-            # Get the indices of the columns with the largest distance to each row
-            sorted_pairwise = np.argsort(pairwise.values, 1)
-            idx = sorted_pairwise[:, :5]
-            # Get the 5 nearest distances and labels
-            knn_distances = np.array([[pairwise.iloc[i, j] for j in row] for i, row in enumerate(idx)])
-
-            max_distance = np.array([pairwise.iloc[i, j] for i, j in enumerate(sorted_pairwise[:, -1])])
-            max_distance[max_distance<1]=1
-            reshaped_distances = knn_distances / max_distance[:, np.newaxis]
-
-            knn_labels = np.array([[train_labels[element] for element in row] for row in idx])
-            # Calculate the weighted knn where the distance between the sample and nearest neighbour is subtracted from the neighbour label according to:
-            # Label_k * (1 - |distance to k|) + (1 - label_k) * |distance to k|, where k represents the nearest neighbour k
-            weighted_knn_labels = knn_labels + ((1 - 2 * knn_labels) * reshaped_distances)
-
-            accuracy = np.equal(weighted_knn_labels.mean(1).round(), test_labels).astype(float).mean()
-
-            y_pred = weighted_knn_labels.mean(1).round()
-            f1 = f1_score(test_labels, y_pred)
-            y_prob = weighted_knn_labels.mean(1)
-            ap = average_precision_score(test_labels, y_prob)
-            auroc = roc_auc_score(test_labels, y_prob)
-            return [accuracy, f1, ap, auroc]

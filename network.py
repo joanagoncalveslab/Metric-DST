@@ -1,5 +1,8 @@
+from typing import Tuple
 import torch.nn as nn
 import torch
+from torch.utils.data import DataLoader
+from pytorch_metric_learning import losses, miners
 
 def layer(in_f, out_f, *args, **kwargs):
     return nn.Sequential(
@@ -18,16 +21,21 @@ class Net(nn.Module):
         return x
 
 class Network():
-    def __init__(self, layers, loss_func, learning_rate, device, mining_func=None):
+    model:Net
+    mining_func:miners.BaseMiner
+    loss_func:losses.BaseMetricLossFunction
+    optimizer: torch.optim.Optimizer
+    device:torch.device
+
+
+    def __init__(self, layers:list, loss_func:losses.BaseMetricLossFunction, learning_rate:float, device:torch.device, mining_func:miners.BaseMiner=None):
         self.model = Net(layers).to(device)
         self.mining_func = mining_func
         self.loss_func = loss_func
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         self.device = device
-        self.train_loss_history = []
-        self.evaluation_loss_history = []
 
-    def train(self, data_loader):
+    def train(self, data_loader:DataLoader)->float:
         self.model.train()
         total_loss = 0
         for batch_idx, (data, labels, _, _) in enumerate(data_loader):
@@ -42,10 +50,9 @@ class Network():
             total_loss += loss.item()*data.size(0)
             loss.backward()
             self.optimizer.step()
-        self.train_loss_history.append(total_loss/len(data_loader.sampler))
         return total_loss/len(data_loader.sampler)
 
-    def evaluate(self, data_loader):
+    def evaluate(self, data_loader:DataLoader)->Tuple[float, torch.Tensor, torch.Tensor, list]:
         self.model.eval()
         loss = 0
         labels = torch.zeros(0, dtype=torch.long, device='cpu')
@@ -60,10 +67,9 @@ class Network():
                 loss += self.loss_func(torch.squeeze(output), torch.squeeze(target)).item()*data.size(0)
                 embeddings = torch.cat([embeddings, output.cpu()])
         loss /= len(data_loader.sampler)
-        self.evaluation_loss_history.append(loss)
         return loss, embeddings, labels, genes
     
-    def run(self, data_loader):
+    def run(self, data_loader:DataLoader)->Tuple[torch.Tensor, torch.Tensor, list]:
         self.model.eval()
         labels = torch.zeros(0, dtype=torch.long, device='cpu')
         embeddings = torch.zeros(0, dtype=torch.long, device='cpu')
@@ -77,7 +83,7 @@ class Network():
                 embeddings = torch.cat([embeddings, output.cpu()])
         return embeddings, labels, genes
 
-    def run_with_idx(self, data_loader):
+    def run_with_idx(self, data_loader:DataLoader)->Tuple[torch.Tensor, torch.Tensor, list, list]:
         self.model.eval()
         labels = torch.zeros(0, dtype=torch.long, device='cpu')
         embeddings = torch.zeros(0, dtype=torch.long, device='cpu')

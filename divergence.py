@@ -1,3 +1,4 @@
+from math import ceil, floor
 import numpy as np
 import torch
 import time
@@ -5,158 +6,153 @@ import time
 from scipy.spatial.distance import cdist
 from customDataset import CustomDataset
 import pandas as pd
-from sklearn.metrics import roc_auc_score, f1_score, average_precision_score
 
 import torch.utils.data
 
-from network import Network, Net
-from typing import OrderedDict, Sequence, Iterator
+from network import Network
+from typing import Sequence
 
-from visualize import visualize_show
-
-def create_customDataset(data:pd.DataFrame) -> CustomDataset:
-        features = data.iloc[:, 4:]
-        labels = data["class"].astype('long')
-        genes = data.iloc[:, :2]
-        return CustomDataset(
-            torch.Tensor(features.values.astype(np.float64)), 
-            torch.Tensor(labels.values.astype(np.float64)), 
-            genes.values.tolist())
-
-class EarlyStop():
-    model:Net
-    model_state: OrderedDict[str, torch.Tensor]
-    patience: int
-    delta: float
-    min_val_loss: float
-    counter: int
-    early_stop: bool
-    best_epoch: int
-
-    def __init__(self, patience=5, delta=0):
-        self.patience = patience
-        self.delta = delta
-        self.min_val_loss = np.Inf
-        self.counter = 0
-        self.early_stop = False
-        self.model_state = None
-        self.best_epoch = 0
-
-    def __call__(self, val_loss, model, epoch):
-        if val_loss < self.min_val_loss - self.delta:
-            self.min_val_loss = val_loss
-            self.counter = 0
-            self.save_checkpoint(model)
-            self.best_epoch = epoch
-        else:
-            self.counter+=1
-            if self.counter > self.patience:
-                self.early_stop = True
-
-    def save_checkpoint(self, model:Net):
-        self.model_state = model.state_dict()
-
-    def load_checkpoint(self, model:Net):
-        model.load_state_dict(self.model_state)
-        return self.model_state
-
-    def reset(self):
-        self.min_val_loss = np.Inf
-        self.counter = 0
-        self.early_stop = False
-        self.model_state = None
-        self.best_epoch = 0
-
+from visualize import visualize, visualize_show
+from metric_learning_utils import EarlyStop, AccuracyCalculator, MySubsetRandomSampler, create_customDataset
 
 class SelfTraining():
-
-    network:Network = None
-
-    def __init__(self, network:Network, validation_data:CustomDataset, training_data:CustomDataset, training_idx: Sequence[int], unlabeled_idx: Sequence[int], outputFolder: str):
+    def __init__(self, network:Network, test_data:pd.DataFrame, train_data:pd.DataFrame, unlabeled_data:pd.DataFrame, validation_data:pd.DataFrame, outputFolder: str, knn: int):
         self.network = network
-        self.accuracyCalculator = self.AccuracyCalculator()
+        self.accuracyCalculator = AccuracyCalculator(knn=knn)
         self.outputFolder = outputFolder
+        self.number_of_unlabeled_samples_added = 0
+        self.knn = knn
+        self.transform_data(test_data, train_data, unlabeled_data, validation_data)
 
-        print(f"Training size: {len(training_idx)}")
-        print(f"Unlabeled size: {len(unlabeled_idx)}")
+    def transform_data(self, test_data:pd.DataFrame, train_data:pd.DataFrame, unlabeled_data:pd.DataFrame, validation_data:pd.DataFrame) -> None:
+        self.train_data = train_data
+        self.unlabeled_data = unlabeled_data
 
-        g_validation = torch.Generator().manual_seed(43)
+        combined_data = pd.concat([train_data, unlabeled_data], ignore_index=True)
+        train_idx = range(len(train_data))
+        unlabeled_idx = range(len(train_data), len(combined_data))
+        assert(train_data.equals(combined_data.iloc[train_idx]))
+
         g_train = torch.Generator().manual_seed(42)
         g_unlabeled = torch.Generator().manual_seed(42)
-        validation_sampler = torch.utils.data.RandomSampler(validation_data, generator=g_validation)
-        self.training_sampler = self.MySubsetRandomSampler(training_idx, g_train)
-        self.unlabeled_sampler = self.MySubsetRandomSampler(unlabeled_idx, g_unlabeled)
+        g_pseudolabel = torch.Generator().manual_seed(42)
 
-        self.validation_data_loader = torch.utils.data.DataLoader(validation_data, batch_size=64, sampler=validation_sampler)
-        self.training_data_loader = torch.utils.data.DataLoader(training_data, batch_size=64, sampler=self.training_sampler)
-        self.unlabeled_data_loader = torch.utils.data.DataLoader(training_data, batch_size=64, sampler=self.unlabeled_sampler)
+        test_data = create_customDataset(test_data)
+        combined_data = create_customDataset(combined_data)
+        validation_data = create_customDataset(validation_data)
+
+        test_sampler = torch.utils.data.SequentialSampler(test_data)
+        train_sampler = MySubsetRandomSampler(train_idx, generator=g_train)
+        unlabeled_sampler = MySubsetRandomSampler(unlabeled_idx, generator=g_unlabeled)
+        validation_sampler = torch.utils.data.SequentialSampler(validation_data)
+        pseudolabel_sampler = MySubsetRandomSampler([], generator=g_pseudolabel)
+        self.train_sampler = train_sampler
+        self.unlabeled_sampler = unlabeled_sampler
+        self.pseudolabel_sampler = pseudolabel_sampler
+        self.test_data_loader = torch.utils.data.DataLoader(test_data, batch_size=len(test_data), sampler=test_sampler)
+        self.train_data_loader = torch.utils.data.DataLoader(combined_data, batch_size=64, sampler=train_sampler)
+        self.unlabeled_data_loader = torch.utils.data.DataLoader(combined_data, batch_size=64, sampler=unlabeled_sampler)
+        self.validation_data_loader = torch.utils.data.DataLoader(validation_data, batch_size=len(validation_data), sampler=validation_sampler)
+        self.pseudolabel_data_loader = torch.utils.data.DataLoader(combined_data, batch_size=64, sampler=pseudolabel_sampler)
     
     def train(self, fold) -> None:
         training_rounds = 100
         early_stop = EarlyStop()
+
         metrics = []
         num_training_rounds = 0
+        participating_training_rounds = 0
+        temp_metrics = []
+        all_metrics = []
+
         # Train initial model
         for epoch in range(training_rounds):
-            training_loss = self.network.train(self.training_data_loader)
+            training_loss = self.network.train(self.train_data_loader)
             num_training_rounds += 1
+            participating_training_rounds += 1
             validation_loss, validation_embeddings, validation_labels, validation_genes = self.network.evaluate(self.validation_data_loader)
-            train_embeddings, train_labels, train_genes = self.network.run(self.training_data_loader)
+            train_embeddings, train_labels, train_genes = self.network.run(self.train_data_loader)
             accuracies = self.accuracyCalculator.get_accuracies(train_embeddings.numpy(), train_labels.numpy(), validation_embeddings.numpy(), validation_labels.numpy())
-            metrics.append([num_training_rounds, fold, training_loss, validation_loss, *accuracies])
-            early_stop(validation_loss, self.network.model, num_training_rounds)
+            temp_metrics.append([participating_training_rounds, fold, 0, training_loss, validation_loss, *accuracies])
+            all_metrics.append([num_training_rounds, fold, 0, training_loss, validation_loss, *accuracies])
+            early_stop(validation_loss, self.network.model, participating_training_rounds)
             if early_stop.early_stop:
                 print(f"Early stop after epoch: {epoch}")
                 early_stop.load_checkpoint(self.network.model)
+                metrics.extend(temp_metrics[:-(early_stop.get_patience()+1)])
+                participating_training_rounds -= (early_stop.get_patience()+1)
                 break
 
         # Loop and add new samples
-        stop_self_training = EarlyStop(patience=7)
-        for loop in range(100):
-            self.find_sample_to_add()
-            stop_training_new_samples = EarlyStop(patience=10)
-            for epoch in range(100):
-                training_loss = self.network.train(self.training_data_loader)
-                num_training_rounds += 1
-                validation_loss, validation_embeddings, validation_labels, validation_genes = self.network.evaluate(self.validation_data_loader)
-                train_embeddings, train_labels, train_genes = self.network.run(self.training_data_loader)
-                accuracies = self.accuracyCalculator.get_accuracies(train_embeddings.numpy(), train_labels.numpy(), validation_embeddings.numpy(), validation_labels.numpy())
-                metrics.append([num_training_rounds, fold, training_loss, validation_loss, *accuracies])
-                stop_training_new_samples(validation_loss, self.network.model, num_training_rounds)
-                if stop_training_new_samples.early_stop:
-                    print(f"Early stop after epoch: {epoch}")
-                    early_stop.load_checkpoint(self.network.model)
-                    break
-            validation_loss, _, _, _ = self.network.evaluate(self.validation_data_loader)
-            stop_self_training(validation_loss, self.network.model, num_training_rounds - 11)
-            if stop_self_training.early_stop:
-                print(f"Early stop after loop: {loop}")
-                early_stop.load_checkpoint(self.network.model)
-                print(f"Best model is: {stop_self_training.best_epoch}")
-                break
+        validation_loss, _, _, _ = self.network.evaluate(self.validation_data_loader)
+        print(validation_loss)
+        stop_self_training = EarlyStop(patience=10, val_loss=validation_loss, model=self.network.model, epoch=participating_training_rounds)
 
+        for loop in range(1, 11):
+            print(f'loop {loop}')
+            self.find_sample_to_add(fold, loop)
+            validation_loss, _, _, _ = self.network.evaluate(self.validation_data_loader)
+            stop_training_new_samples = EarlyStop(patience=10, val_loss=validation_loss, model=self.network.model, epoch=participating_training_rounds)
+            temp_metrics = []
+            for epoch in range(10):
+                training_loss = self.network.train(self.pseudolabel_data_loader)
+                num_training_rounds += 1
+                participating_training_rounds += 1
+                validation_loss, validation_embeddings, validation_labels, validation_genes = self.network.evaluate(self.validation_data_loader)
+                training_loss, train_embeddings, train_labels, train_genes = self.network.evaluate(self.train_data_loader)
+                # train_embeddings, train_labels, train_genes = self.network.run(self.train_data_loader)
+                accuracies = self.accuracyCalculator.get_accuracies(train_embeddings.numpy(), train_labels.numpy(), validation_embeddings.numpy(), validation_labels.numpy())
+                temp_metrics.append([participating_training_rounds, fold, loop, training_loss, validation_loss, *accuracies])
+                all_metrics.append([num_training_rounds, fold, loop, training_loss, validation_loss, *accuracies])
+                stop_training_new_samples(validation_loss, self.network.model, participating_training_rounds)
+            metrics.extend(temp_metrics)
+                # if stop_training_new_samples.early_stop:
+                #     print(f"Early stop after epoch: {epoch}")
+                #     stop_training_new_samples.load_checkpoint(self.network.model)
+                #     metrics.extend(temp_metrics[:-(stop_training_new_samples.get_patience()+1)])
+                #     participating_training_rounds -= (stop_training_new_samples.get_patience()+1)
+                #     break
+
+            validation_loss, _, _, _ = self.network.evaluate(self.validation_data_loader)
+            stop_self_training.check(validation_loss, self.network.model, participating_training_rounds)
+            # if stop_self_training.early_stop:
+            #     print(f"Early stop after loop: {loop}")
+            #     stop_self_training.load_checkpoint(self.network.model)
+            #     print(f"Best model is: {stop_self_training.best_epoch}")
+            #     break
+
+        train_embeddings, train_labels, train_genes = self.network.run(self.train_data_loader)
+        test_loss, test_embeddings, test_labels, test_genes = self.network.evaluate(self.test_data_loader)
+        visualize(train_embeddings, train_labels, test_embeddings, test_labels, self.outputFolder, fold, 1000)
+        accuracies = self.accuracyCalculator.get_accuracies(train_embeddings.numpy(), train_labels.numpy(), test_embeddings.numpy(), test_labels.numpy())
+        
         pd.DataFrame(
             data=metrics, 
-            columns=['epoch', 'fold', 'train_loss', 'test_loss', 'accuracy', 'f1_score', 'average_precision', 'auroc']
+            columns=['epoch', 'fold', 'loop', 'train_loss', 'validation_loss', 'accuracy', 'f1_score', 'average_precision', 'auroc']
         ).to_csv(self.outputFolder+"performance.csv", mode='a', header=fold==0)
+        pd.DataFrame(
+            data=all_metrics, 
+            columns=['epoch', 'fold', 'loop', 'train_loss', 'validation_loss', 'accuracy', 'f1_score', 'average_precision', 'auroc']
+        ).to_csv(self.outputFolder+"complete_performance.csv", mode='a', header=fold==0)
+        pd.DataFrame(
+            data=[[fold, test_loss, *accuracies]],
+            columns=['fold', 'test_loss', 'accuracy', 'f1_score', 'average_precision', 'auroc']
+        ).to_csv(self.outputFolder+"test_performance.csv", mode='a', header=fold==0)
 
-    def find_sample_to_add(self):
-        training_embeddings, training_labels, training_genes = self.network.run(self.training_data_loader)
+    def find_sample_to_add(self, fold, loop) -> None:
+        training_embeddings, training_labels, training_genes = self.network.run(self.train_data_loader)
         unlabeled_embeddings, unlabeled_true_labels, unlabeled_genes, unlabeled_idx = self.network.run_with_idx(self.unlabeled_data_loader)
         unlabeled_idx  = np.array(unlabeled_idx)
-        # Find dimension of output space
-        dimensions = []
-        for dimension in zip(*training_embeddings):
-            dimensions.append((min(dimension), max(dimension)))
 
         # Find samples to add
+        number_of_samples_to_add = 2
         pseudolabels = []
         samples_to_add = []
-        while len(pseudolabels) < 10:
+        while len(pseudolabels) < number_of_samples_to_add:
             # Random point in space
             random_coordinate = []
-            for low, high in dimensions:
-                random_coordinate.append((np.random.random() * (high-low)) + low)
+            for _ in range(2):
+                random_coordinate.append(np.random.random())
 
             # Find closest unlabeled sample
             selected_gene_id = pd.DataFrame(
@@ -167,112 +163,31 @@ class SelfTraining():
             closest_samples = pd.DataFrame(
                 cdist(training_embeddings, [np.array(unlabeled_embeddings[selected_gene_id])], metric='euclidean')
             ).sort_values(by=0)
-            knn_labels = np.array([training_labels[sample] for sample in closest_samples.index.values[:5]])
-            knn_distances = np.array(closest_samples.values[:5, :].T[0])
+            knn_labels = np.array([training_labels[sample] for sample in closest_samples.index.values[:self.knn]])
+            knn_distances = np.array(closest_samples.values[:self.knn, :].T[0])
+
             weighted_knn_labels = knn_labels + np.multiply((1 - 2 * knn_labels), knn_distances.T).T
 
             confidence = weighted_knn_labels.mean()
             if (confidence > 0.8 or confidence < 0.2) and selected_gene_id not in samples_to_add:
-                if round(confidence) == 1 and sum(pseudolabels) < 5:
+                if round(confidence) == 1 and sum(pseudolabels) < ceil(number_of_samples_to_add/2.0):
                     samples_to_add.append(selected_gene_id)
                     pseudolabels.append(round(confidence))
-                elif round(confidence) == 0 and len(pseudolabels) - sum(pseudolabels) < 5:
+                elif round(confidence) == 0 and len(pseudolabels) - sum(pseudolabels) < floor(number_of_samples_to_add/2.0):
                     samples_to_add.append(selected_gene_id)
                     pseudolabels.append(round(confidence))
         
-        visualize_show(training_embeddings, training_labels, [unlabeled_embeddings[x] for x in samples_to_add], [unlabeled_true_labels[x] for x in samples_to_add])
+        # visualize_show(training_embeddings, training_labels, [unlabeled_embeddings[x] for x in samples_to_add], pseudolabels, self.outputFolder, fold, loop)
 
         # Transfer selected samples from unlabeled to labeled samples
+
         indices_of_samples_to_add = [unlabeled_idx[x] for x in samples_to_add]
+        
         self.unlabeled_sampler.remove_indices(indices_of_samples_to_add)
-        self.training_sampler.add_indices(indices_of_samples_to_add)
+        self.train_sampler.add_indices(indices_of_samples_to_add)
+        self.pseudolabel_sampler.set_indices(indices_of_samples_to_add)
         # Update the newly added samples with the pseudolabels as their labels
         for x, y in zip(pseudolabels, indices_of_samples_to_add):
-            self.training_data_loader.dataset.labels[y] = x
-
-    class MySubsetRandomSampler(torch.utils.data.Sampler[int]):
-        r"""Samples elements randomly from a given list of indices, without replacement.
-
-        Args:
-            indices (sequence): a sequence of indices
-            generator (Generator): Generator used in sampling.
-        """
-        indices: Sequence[int]
-
-        def __init__(self, indices: Sequence[int], generator=None) -> None:
-            self.indices = indices
-            self.generator = generator
-
-        def __iter__(self) -> Iterator[int]:
-            for i in torch.randperm(len(self.indices), generator=self.generator):
-                yield self.indices[i]
-
-        def __len__(self) -> int:
-            return len(self.indices)
-
-        def add_index(self, index: int) -> None:
-            indices = list(self.indices)
-            indices.append(index)
-            self.indices = indices
-
-        def add_indices(self, indices: Sequence[int]) -> None:
-            prev_indices = list(self.indices)
-            prev_indices.extend(indices)
-            self.indices = prev_indices
-        
-        def remove_index(self, index: int) -> None:
-            indices = list(self.indices)
-            indices.remove(index)
-            self.indices = indices
-
-        def remove_indices(self, indices: Sequence[int]) -> None:
-            for index in indices:
-                self.remove_index(index)
-
-    class AccuracyCalculator():
-        def __init__(self) -> None:
-            pass
-
-        def get_accuracies(self, train_embeddings, train_labels, test_embeddings, test_labels):
-            # Pairwise distances between test/validation embeddings as the rows and training embeddings as the columns
-            pairwise = pd.DataFrame(
-                cdist(test_embeddings, train_embeddings, metric='euclidean')
-            )
-            # Get the indices of the columns with the largest distance to each row
-            idx = np.argsort(pairwise.values, 1)[:, :5]
-            # Get the 5 nearest distances and labels
-            knn_distances = np.array([[pairwise.iloc[i, j] for j in row] for i, row in enumerate(idx)])
-            knn_labels = np.array([[train_labels[element] for element in row] for row in idx])
-            # Calculate the weighted knn where the distance between the sample and nearest neighbour is subtracted from the neighbour label according to:
-            # Label_k * (1 - |distance to k|) + (1 - label_k) * |distance to k|, where k represents the nearest neighbour k
-            weighted_knn_labels = knn_labels + ((1 - 2 * knn_labels) * knn_distances)
+            self.train_data_loader.dataset.labels[y] = x
             
-            accuracy = np.equal(weighted_knn_labels.mean(1).round(), test_labels).astype(float).mean()
-
-            y_pred = weighted_knn_labels.mean(1).round()
-            f1 = f1_score(test_labels, y_pred)
-            y_prob = weighted_knn_labels.mean(1)
-            ap = average_precision_score(test_labels, y_prob)
-            auroc = roc_auc_score(test_labels, y_prob)
-            return [accuracy, f1, ap, auroc]
-
-        def get_accuracies_torch(self, train_embeddings:torch.Tensor, train_labels:torch.Tensor, test_embeddings:torch.Tensor, test_labels):
-            # Pairwise distances between test/validation embeddings as the rows and training embeddings as the columns
-            pairwise = torch.cdist(test_embeddings, train_embeddings, p=2)
-            # Get the indices of the columns with the largest distance to each row
-            idx = torch.argsort(pairwise, dim=1)
-            # Get the 5 nearest distances and labels
-            knn_distances = np.array([[pairwise[i, j] for j in row] for i, row in enumerate(idx)])
-            knn_labels = np.array([[train_labels[element] for element in row] for row in idx])
-            # Calculate the weighted knn where the distance between the sample and nearest neighbour is subtracted from the neighbour label according to:
-            # Label_k * (1 - |distance to k|) + (1 - label_k) * |distance to k|, where k represents the nearest neighbour k
-            weighted_knn_labels = knn_labels + ((1 - 2 * knn_labels) * knn_distances)
-            
-            accuracy = np.equal(weighted_knn_labels.mean(1).round(), test_labels).astype(float).mean()
-
-            y_pred = weighted_knn_labels.mean(1).round()
-            f1 = f1_score(test_labels, y_pred)
-            y_prob = weighted_knn_labels.mean(1)
-            ap = average_precision_score(test_labels, y_prob)
-            auroc = roc_auc_score(test_labels, y_prob)
-            return [accuracy, f1, ap, auroc]
+        self.number_of_unlabeled_samples_added += number_of_samples_to_add
