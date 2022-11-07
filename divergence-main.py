@@ -1,3 +1,4 @@
+import argparse
 import platform
 import os, random
 from re import T
@@ -37,7 +38,27 @@ def setup_seed(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
 
+def init_argparse() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        usage="%(prog)s [OPTION] [FILE]...",
+        description="Run self training model"
+    )
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument('-C', '--cancer', choices=['BRCA', 'CESC', 'COAD', 'KIRC', 'LAML', 'LUAD', 'SKCM', 'OV'], default='BRCA')
+    parser.add_argument("--output-file", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--lr", type=float, default=0.01)
+
+    parser.add_argument("--knn", type=int, default=5)
+    parser.add_argument("--conf", type=float, default=0.8)
+    parser.add_argument("--num-pseudolabels", type=int, default=50)
+
+    return parser
+
 if __name__ == '__main__':
+    parser = init_argparse()
+    args = parser.parse_args()
+
     dataPath = "train_seq_128_BRCA.csv"
     if not os.path.exists(dataPath):
         dataPath = webDriveFolder + dataPath
@@ -46,16 +67,38 @@ if __name__ == '__main__':
     unlabeledDatapath = webDriveFolder + "unknown_repair_cancer_BRCA_seq_128.csv"
     testDatapath = webDriveFolder + "test_seq_128.csv"
 
-    outputFile = "experiment-"
-    i = 0
-    while os.path.exists(outputFolder + outputFile + str(i)):
-        i += 1
-    outputFolder = outputFolder + outputFile + str(i) + '/'
+    if args.output_file:
+        outputFolder = outputFolder + args.output_file + "/"
+    else:
+        outputFile = "experiment-"
+        i = 0
+        while os.path.exists(outputFolder + outputFile + str(i)):
+            i += 1
+        outputFolder = outputFolder + outputFile + str(i) + '/'
 
     if not os.path.exists(outputFolder):
         os.mkdir(outputFolder)
 
-    setup_seed(42)
+    if args.lr > 1:
+        args.lr = 1 / args.lr
+
+    while args.conf > 1:
+        args.conf = args.conf / 10
+
+    with open(outputFolder + 'settings.txt', 'a') as f:
+        f.write('\n'.join([
+            outputFolder,
+            'batch size: '+str(args.batch_size),
+            'cancer: '+str(args.cancer),
+            'learning rate: '+str(args.lr),
+            'seed: '+str(args.seed),
+            'knn: '+str(args.knn),
+            'confidence: '+str(args.conf),
+            'number of pseudolabels added per round: '+str(args.num_pseudolabels),
+            ''
+        ]))
+
+    setup_seed(args.seed)
 
     dataset = pd.read_csv(dataPath, index_col=0).fillna(0)
     # dataset = dataset[dataset['cancer']=="BRCA"]
@@ -106,8 +149,8 @@ if __name__ == '__main__':
         
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
-        ntwrk = Network([128,8,2], loss_func, 0.01, device)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, outputFolder, 10)
+        ntwrk = Network([128,8,2], loss_func, args.lr, device)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, outputFolder, args.knn, args.conf, args.num_pseudolabels)
         ml.train(fold)
-        
+
     create_convergence_graph.create_fold_convergence_graph(outputFolder + "performance.csv", outputFolder)
