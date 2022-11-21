@@ -53,19 +53,23 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument("--conf", type=float, default=0.8)
     parser.add_argument("--num-pseudolabels", type=int, default=50)
 
+    parser.add_argument("--retrain", action='store_true')
+    parser.add_argument("--early-stop-pseudolabeling", action='store_true')
+    parser.add_argument("--single-fold", action='store_true')
+
     return parser
 
 if __name__ == '__main__':
     parser = init_argparse()
     args = parser.parse_args()
 
-    dataPath = "train_seq_128_BRCA.csv"
+    dataPath = f"train_seq_128_{args.cancer}.csv"
     if not os.path.exists(dataPath):
         dataPath = webDriveFolder + dataPath
         if not os.path.exists(dataPath):
             raise FileNotFoundError('The dataset does not exist')
-    unlabeledDatapath = webDriveFolder + "unknown_repair_cancer_BRCA_seq_128.csv"
-    testDatapath = webDriveFolder + "test_seq_128.csv"
+    unlabeledDatapath = webDriveFolder + f"unknown_repair_cancer_{args.cancer}_seq_128.csv"
+    testDatapath = webDriveFolder + f"test_seq_128.csv"
 
     if args.output_file:
         outputFolder = outputFolder + args.output_file + "/"
@@ -95,6 +99,8 @@ if __name__ == '__main__':
             'knn: '+str(args.knn),
             'confidence: '+str(args.conf),
             'number of pseudolabels added per round: '+str(args.num_pseudolabels),
+            'retrain model from scratch during pseudolabeling: '+str(args.retrain),
+            'add pseudolabels until convergence: '+str(args.early_stop_pseudolabeling),
             ''
         ]))
 
@@ -105,11 +111,11 @@ if __name__ == '__main__':
     dataset = dataset[(dataset['seq1']!=-1.0) & (dataset['seq1']!=0.0)]
 
     unlabeled_dataset = pd.read_csv(unlabeledDatapath)
-    unlabeled_dataset = unlabeled_dataset[unlabeled_dataset['cancer'] == "BRCA"]
+    unlabeled_dataset = unlabeled_dataset[unlabeled_dataset['cancer'] == args.cancer]
     unlabeled_dataset = unlabeled_dataset[(unlabeled_dataset['seq1']!=-1.0) & (unlabeled_dataset['seq1']!=0.0)]
 
     test_dataset = pd.read_csv(testDatapath)
-    test_dataset = test_dataset[test_dataset['cancer'] == "BRCA"]
+    test_dataset = test_dataset[test_dataset['cancer'] == args.cancer]
     test_dataset = test_dataset[(test_dataset['seq1']!=-1.0) & (test_dataset['seq1']!=0.0)]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -151,6 +157,7 @@ if __name__ == '__main__':
 
         ntwrk = Network([128,8,2], loss_func, args.lr, device)
         ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, outputFolder, args.knn, args.conf, args.num_pseudolabels)
-        ml.train(fold)
-
+        ml.train(fold, retrain=args.retrain, add_samples_to_convergence=args.early_stop_pseudolabeling)
+        if args.single_fold:
+            break
     create_convergence_graph.create_fold_convergence_graph(outputFolder + "performance.csv", outputFolder)

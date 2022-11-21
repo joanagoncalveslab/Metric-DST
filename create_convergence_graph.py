@@ -28,7 +28,7 @@ def create_fold_convergence_graph(location, folder):
 
 def create_fold_convergence_graph_individual_folds(location, folder):
     df = pd.read_csv(location, index_col=0)
-    df = df[["epoch", "fold", "train_loss", "test_loss", "accuracy", "f1_score", "average_precision", "auroc"]]
+    df = df[["epoch", "fold", "train_loss", "validation_loss", "accuracy", "f1_score", "average_precision", "auroc"]]
     df = df.melt(['epoch', 'fold'], var_name='cols', value_name='vals')
     sn.set_theme()
     g=sn.FacetGrid(df, col='fold', col_wrap=3)
@@ -82,7 +82,7 @@ def create_facet_grid(data:pd.DataFrame, outputfile:str):
     plt.show()
 
 if __name__=="__main__":
-    create_fold_convergence_graph_individual_folds("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-6/complete_performance.csv", "")
+    create_fold_convergence_graph_individual_folds("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-divergence-retrain-knn-10-conf-8/performance.csv", "")
     exit()
     # create_fold_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-64-lr-0.01-ml/performance.csv")
 

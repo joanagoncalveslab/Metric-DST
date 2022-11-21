@@ -76,8 +76,8 @@ class SelfTraining():
         for loop in (range(1, 101) if add_samples_to_convergence else range(1,10)):
             print(f'loop {loop}')
             self.find_sample_to_add(fold, loop)
-
-            if retrain:
+            
+            if retrain and add_samples_to_convergence:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 device = torch.device(device)
                 distance = distances.LpDistance(normalize_embeddings=False, p=2, power=1)
@@ -87,7 +87,7 @@ class SelfTraining():
 
                 self.network = ntwrk
                 self.train_until_convergence(self.train_data_loader, fold, loop, 5, 0)
-                
+
                 validation_loss, _, _, _ = self.network.evaluate(self.validation_data_loader)
                 stop_self_training.check(validation_loss, self.network.model, self.participating_training_rounds)
                 if stop_self_training.early_stop:
@@ -95,6 +95,16 @@ class SelfTraining():
                     stop_self_training.load_checkpoint(self.network.model)
                     print(f"Best model is: {stop_self_training.best_epoch}")
                     break
+            elif retrain:
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                device = torch.device(device)
+                distance = distances.LpDistance(normalize_embeddings=False, p=2, power=1)
+                reducer = reducers.MeanReducer()
+                loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
+                ntwrk = Network([128,8,2], loss_func, 0.01, device)
+
+                self.network = ntwrk
+                self.train_until_convergence(self.train_data_loader, fold, loop, 5, 0)
 
             elif add_samples_to_convergence:
                 self.train_until_convergence(self.pseudolabel_data_loader, fold, loop, 10, 0, self.network.model, epoch=self.participating_training_rounds)
