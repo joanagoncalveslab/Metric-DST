@@ -192,3 +192,4 @@ MNIST/
 *.jpeg
 *.csv
 experiment-*/
+!experiment-analysis/

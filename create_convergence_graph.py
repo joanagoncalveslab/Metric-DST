@@ -23,7 +23,7 @@ def create_fold_convergence_graph(location, folder):
     df = df.melt('epoch', var_name='cols', value_name='vals')
     sn.set_theme()
     sn.lineplot(data=df, x="epoch", y='vals', hue='cols', ci='sd')
-    plt.savefig(folder+'performance.png')
+    plt.savefig(location+".png")
     # plt.show()
 
 def create_fold_convergence_graph_individual_folds(location, folder):
@@ -82,7 +82,8 @@ def create_facet_grid(data:pd.DataFrame, outputfile:str):
     plt.show()
 
 if __name__=="__main__":
-    create_fold_convergence_graph_individual_folds("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-divergence-retrain-knn-10-conf-8/performance.csv", "")
+    # create_fold_convergence_graph_individual_folds("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-divergence-retrain-knn-10-conf-8/performance.csv", "")
+    create_fold_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-divergence-pipeline-BRCA-knn-10-conf-85/diversity_performance.csv", "")
     exit()
     # create_fold_convergence_graph("W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/output/experiment-BRCA-64-lr-0.01-ml/performance.csv")
 

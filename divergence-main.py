@@ -1,7 +1,6 @@
 import argparse
 import platform
-import os, random
-from re import T
+import os, random, time
 
 import pandas as pd
 import numpy as np
@@ -124,7 +123,7 @@ if __name__ == '__main__':
 
     distance = distances.LpDistance(normalize_embeddings=False, p=2, power=1)
     reducer = reducers.MeanReducer()
-    
+    start = time.time()
     for fold in range(5):
         print(f'fold: {fold}')
 
@@ -156,8 +155,10 @@ if __name__ == '__main__':
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
         ntwrk = Network([128,8,2], loss_func, args.lr, device)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, outputFolder, args.knn, args.conf, args.num_pseudolabels)
-        ml.train(fold, retrain=args.retrain, add_samples_to_convergence=args.early_stop_pseudolabeling)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, outputFolder, "semisupervised", args.knn, args.conf, args.num_pseudolabels)
+        ml.train(fold, retrain=args.retrain, add_samples_to_convergence=args.early_stop_pseudolabeling, pseudolabel_method="semi_supervised")
         if args.single_fold:
             break
-    create_convergence_graph.create_fold_convergence_graph(outputFolder + "performance.csv", outputFolder)
+    end = time.time()
+    print(end - start)
+    create_convergence_graph.create_fold_convergence_graph(outputFolder + "semisupervised_performance.csv", outputFolder)

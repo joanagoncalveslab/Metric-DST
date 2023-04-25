@@ -118,14 +118,27 @@ class EarlyStop():
     def check(self, val_loss: float, model: Net, epoch: int) -> None:
         if val_loss < self.min_val_loss - self.delta:
             print(f'updated model becuase {val_loss} is lower than {self.min_val_loss}')
+            res = {
+                'model_is_updated': True,
+                'old_val_loss': self.min_val_loss,
+                'new_val_loss': val_loss,
+                'epoch': epoch
+            }
             self.min_val_loss = val_loss
             self.counter = 0
             self.save_checkpoint(model)
             self.best_epoch = epoch
+            return res 
         else:
             self.counter+=1
             if self.counter >= self.patience:
                 self.early_stop = True
+            return {
+                'model_is_updated': False,
+                'old_val_loss': self.min_val_loss,
+                'new_val_loss': val_loss,
+                'epoch': epoch
+            }
 
     def save_checkpoint(self, model:Net) -> None:
         self.model_state = deepcopy(model.state_dict())
