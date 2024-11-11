@@ -4,7 +4,7 @@ import os, sys, random, gc
 project_path = '.'
 path2this = os.path.dirname(os.path.abspath(__file__)).split('/')
 for i, folder in enumerate(path2this):
-    if folder.lower() == 'dssl4sl':
+    if folder.lower() == 'metric-dst':
         project_path = '/'.join(path2this[:i + 1])
 sys.path.insert(0, project_path)
 
@@ -36,12 +36,7 @@ from src.andrei import dataset_generator as a_dg
 from src.custom import dataset_generator as c_dg
 from src.dbast import load_dataset as y_dg
 
-if platform.system() == 'Windows':
-    webDriveFolder = "W:/staff-umbrella/JGMasters/2122-mathijs-de-wolf/feature_sets/"
-    outputFolder = config.RESULT_DIR / 'bias' / 'yasin'
-else:
-    webDriveFolder = "/home/nfs/ytepeli/python_projects/msc-thesis-2122-mathijs-de-wolf/data"
-    outputFolder = config.RESULT_DIR / 'bias' / 'yasin2'
+outputFolder = config.RESULT_DIR / 'bias' / 'yasin2'
 
 
 def setup_seed(seed):
