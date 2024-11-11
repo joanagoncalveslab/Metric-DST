@@ -15,7 +15,7 @@ from visualize import visualize, visualize_show
 from metric_learning_utils import EarlyStop, AccuracyCalculator, MySubsetRandomSampler, create_customDataset
 
 class SelfTraining():
-    def __init__(self, network:Network, test_data:pd.DataFrame, train_data:pd.DataFrame, unlabeled_data:pd.DataFrame, validation_data:pd.DataFrame, outputFolder: str, name:str, knn: int, confidence: float, num_pseudolabels:int):
+    def __init__(self, network:Network, test_data:pd.DataFrame, train_data:pd.DataFrame, unlabeled_data:pd.DataFrame, validation_data:pd.DataFrame, outputFolder: str, name:str, knn: int, confidence: float, num_pseudolabels:int, model_shape):
         self.network = network
         self.accuracyCalculator = AccuracyCalculator(knn=knn)
         self.outputFolder = outputFolder
@@ -27,6 +27,7 @@ class SelfTraining():
         self.max_training_rounds = 100
         self.transform_data(test_data, train_data, unlabeled_data, validation_data)
         self.iteration_stats = {0: {}}
+        self.model_shape = model_shape
 
     def transform_data(self, test_data:pd.DataFrame, train_data:pd.DataFrame, unlabeled_data:pd.DataFrame, validation_data:pd.DataFrame) -> None:
         self.train_data = train_data
@@ -97,7 +98,7 @@ class SelfTraining():
                     distance = distances.LpDistance(normalize_embeddings=False, p=2, power=1)
                     reducer = reducers.MeanReducer()
                     loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
-                    ntwrk = Network([128,8,2], loss_func, 0.01, device)
+                    ntwrk = Network(self.model_shape, loss_func, 0.01, device)
 
                     self.network = ntwrk
                     self.train_until_convergence(self.train_data_loader, fold, loop, 7, 0)
@@ -116,7 +117,7 @@ class SelfTraining():
                     distance = distances.LpDistance(normalize_embeddings=False, p=2, power=1)
                     reducer = reducers.MeanReducer()
                     loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
-                    ntwrk = Network([128,8,2], loss_func, 0.01, device)
+                    ntwrk = Network(self.model_shape, loss_func, 0.01, device)
 
                     self.network = ntwrk
                     self.train_until_convergence(self.train_data_loader, fold, loop, 5, 0)
@@ -357,7 +358,9 @@ class SelfTraining():
         
         class_independant_confidences = [max(confidence, 1 - confidence) for confidence in confidences]
         argsorted_confidences = np.argsort(class_independant_confidences)
-        samples_to_add = argsorted_confidences[-number_of_samples_to_add:]
+        print(argsorted_confidences)
+        print(number_of_samples_to_add)
+        samples_to_add = argsorted_confidences[-int(number_of_samples_to_add):]
 
         selected_confidences = np.take(confidences, samples_to_add)
         pseudolabels = np.take(confidences, samples_to_add).round()

@@ -46,7 +46,11 @@ class Network():
                 indices_tuple = self.mining_func(embeddings, labels)
                 loss = self.loss_func(torch.squeeze(embeddings), torch.squeeze(labels), indices_tuple)
             else:
-                loss = self.loss_func(torch.squeeze(embeddings), torch.squeeze(labels))
+                try:
+                    loss = self.loss_func(torch.squeeze(embeddings), torch.squeeze(labels))
+                except:
+                    print(torch.squeeze(embeddings[0]))
+                    print(torch.squeeze(labels))
             total_loss += loss.item()*data.size(0)
             loss.backward()
             self.optimizer.step()

@@ -11,9 +11,9 @@ from customDataset import CustomDataset
 from network import Net
 
 def create_customDataset(data:pd.DataFrame) -> CustomDataset:
-        features = data.iloc[:, 4:]
+        features = data.iloc[:, :-3]#features = data.iloc[:, 4:]
         labels = data["class"].astype('long')
-        genes = data.iloc[:, :2]
+        genes = data[['gene1','gene2']]#genes = data.iloc[:, :2]
         return CustomDataset(
             torch.Tensor(features.values.astype(np.float64)), 
             torch.Tensor(labels.values.astype(np.float64)), 
