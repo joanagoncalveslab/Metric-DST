@@ -10,6 +10,7 @@ sys.path.insert(0, project_path)
 
 import pandas as pd
 import numpy as np
+from scipy.stats import wilcoxon
 #import matplotlib
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -29,12 +30,16 @@ plt.rc('legend', fontsize=5.5)
 
 
 from src import config
-
+ONLY_KNN=False
 #RAW_METHOD_NAMES = ['supervised', 'true_semi_supervised', 'balanced_semi_supervised', 'diversity']
 #FIXED_METHOD_NAMES = ['Supervised (ML+KNN)', 'Self-Training (ST)', 'Balanced ST (BST)', 'Diverse BST (DBST)']
 SCORES = {'test_loss': 'Loss', 'accuracy': 'Accuracy', 'f1_score': 'F1 Score', 'average_precision': 'AUPRC', 'auroc': 'AUROC'}
 RAW_METHOD_NAMES = ['supervised_none', 'supervised_random', 'supervised', 'true_semi_supervised', 'diversity'] #'supervised_none', 'supervised_random', 
-FIXED_METHOD_NAMES = ['No Bias - Supervised (ML+KNN)', 'Random - Supervised (ML+KNN)','Bias - Supervised (ML+KNN)', 'Bias - Vanilla Self-training (Metric-ST)', 'Bias - Diversity-guided ST (Metric-DST)'] #'No Bias - Supervised (ML+KNN)', 'Random - Supervised (ML+KNN)', 
+FIXED_METHOD_NAMES = ['No Bias - Supervised (ML+KNN)', 'Random - Supervised (ML+KNN)','Bias - Supervised (ML+KNN)','Bias - Vanilla Self-training (Metric-ST)', 'Bias - Diversity-guided ST (Metric-DST)'] #'No Bias - Supervised (ML+KNN)', 'Random - Supervised (ML+KNN)', 
+if ONLY_KNN:
+    RAW_METHOD_NAMES = ['supervised_none', 'supervised_random', 'supervised', 'knn_supervised', 'knn_semi_supervised', 'true_semi_supervised', 'diversity'] #'supervised_none', 'supervised_random', 
+    FIXED_METHOD_NAMES = ['No Bias - Supervised (ML+KNN)', 'Random - Supervised (ML+KNN)','Bias - Supervised (ML+KNN)', 'Bias - Supervised (KNN)', 'Bias - Vanilla Self-training (kNN-ST)' ,'Bias - Vanilla Self-training (Metric-ST)', 'Bias - Diversity-guided ST (Metric-DST)'] #'No Bias - Supervised (ML+KNN)', 'Random - Supervised (ML+KNN)', 
+
 #RAW_METHOD_NAMES, FIXED_METHOD_NAMES = RAW_METHOD_NAMES[2:], FIXED_METHOD_NAMES[2:]
 ALL_DATASETS = ['fire', 'pistachio', 'pumpkin', 'raisin', 'rice', 'spam', 'adult', 'breast_cancer']#fire
 DIMS = [16, 32, 64, 128]#, 256, 512, 1024]
@@ -83,7 +88,7 @@ def init_argparse() -> argparse.ArgumentParser:
 
     parser.add_argument("--knn", type=int, default=10)
     parser.add_argument("--conf", "-c", type=float, default=0.9)
-    parser.add_argument("--num-pseudolabels", type=int, default=-2)
+    parser.add_argument("--num-pseudolabels", '-np', type=int, default=-2)
 
     parser.add_argument("--retrain", "-rt", action='store_true')
     parser.add_argument("--early_stop_pseudolabeling", "-esp", action='store_true')
@@ -132,7 +137,7 @@ def get_results(bias_name, dataset_name, experiment_file):
     return full_res
 
 
-def draw_boxplot(res, outputFolder, title_col, y_axis_col, x_axis_col):
+def draw_boxplot(res, outputFolder, title_col, y_axis_col, x_axis_col, report=False):
     """Visualize the res (pandas df) data with the score suggested and saves it in loc.
     Args:
         loc (str or Path): Location for saving the figure
@@ -167,16 +172,36 @@ def draw_boxplot(res, outputFolder, title_col, y_axis_col, x_axis_col):
     }
     #palette=["#D6604D", "#B2182B", "#5AAE61", "#1B7837", "#9970AB", "#762A83"]#"PRGn"
     palette=['#882E72', '#1965B0', '#4EB265', '#EE8026', '#DC050C']
-    if len(np.unique(res['Method'].values))<5:
-        palette = palette[5-len(np.unique(res['Method'].values)):]
+    default_method_size = 5
+    if ONLY_KNN:
+        palette=['#555555', '#DDDDDD', '#882E72', '#1965B0', '#4EB265', '#F7F056', '#EE8026', '#DC050C']
+        default_method_size = 7
+    
+    if len(np.unique(res['Method'].values))<default_method_size:
+        palette = palette[default_method_size-len(np.unique(res['Method'].values)):]
     g = sns.boxplot(data=res, x=x_axis_col, y=f"{y_axis_col}", hue="Method", palette=palette, width=0.5, hue_order=FIXED_METHOD_NAMES, whis=20, showmeans=True, **PROPS)
+    print(res.columns)
+    for by_xaxis_name, by_xaxis_res in res.groupby(by=x_axis_col):
+        print(f'\n{by_xaxis_name}')
+        biassupervisedres = by_xaxis_res[by_xaxis_res['Method']=='Bias - Supervised (ML+KNN)']
+        biassupervised_folds = biassupervisedres['fold'].values
+        for by_method_name1, by_method_res1 in by_xaxis_res.groupby(by="Method"):
+            if 'Metric' in by_method_name1:
+                common_folds = np.intersect1d(by_method_res1['fold'].values, biassupervised_folds)
+                #print(common_folds)
+                #print(by_method_res1.set_index('fold').loc[common_folds][y_axis_col])
+                #print(f'{by_method_res1[y_axis_col].shape} --- {by_method_res2[y_axis_col].shape}')
+                res_stat = wilcoxon(by_method_res1.set_index('fold').loc[common_folds][y_axis_col], biassupervisedres.set_index('fold').loc[common_folds][y_axis_col], alternative='two-sided')
+                print(f'Biased({biassupervisedres[y_axis_col].shape[0]}) vs {by_method_name1}({by_method_res1[y_axis_col].shape[0]}):\ts_t: {res_stat.statistic}\tp: {res_stat.pvalue}')
+    
     g.legend_.set_title(None)
     #sns.swarmplot(data=res, x="Cancer", y=f"{score}", hue="Method", palette=palette, hue_order=hue_order)
     # plt.legend()#loc='upper left')
     sns.despine(offset=0)
-    add_median_labels(g, 2)
-    add_median_labels(g, 3)
-    add_median_labels(g, 4)
+    if report:
+        add_median_labels(g, 2)
+        add_median_labels(g, 3)
+        add_median_labels(g, 4)
     plt.title(title_col, fontsize = 6.5)
     # for scoret, scored in res.items():
     #     scored.boxplot(grid=False, label=scoret)
@@ -188,8 +213,14 @@ def draw_boxplot(res, outputFolder, title_col, y_axis_col, x_axis_col):
         plt.ylim((0.2, 1.0))
     plt.tick_params(axis ='both', width=0.5)
     plt.ylabel(SCORES[y_axis_col])
+    knn_str = ''
+    if ONLY_KNN:
+        knn_str= '_knn'
     for out_fmt in ['png', 'pdf']:
-        out_loc = outputFolder / f'{y_axis_col}_report.{out_fmt}'
+        if report:
+            out_loc = outputFolder / f'{y_axis_col}{knn_str}_report.{out_fmt}'
+        else:
+            out_loc = outputFolder / f'{y_axis_col}{knn_str}XX.{out_fmt}'
         plt.savefig(out_loc, dpi=300, bbox_inches='tight')
 
 def prepare_main():
@@ -237,7 +268,7 @@ def direct_plot(args, experiment_str, outputFolder, title, x_axis_col):
     elif title=='dataset':
         title_col = CONVS[args.dataset]
     #x_axis_col = 'Bias' #title_col, y_axis_col, x_axis_col
-    for score in ['test_loss', 'accuracy','f1_score','average_precision','auroc']:
+    for score in ['auroc']:#['accuracy','f1_score','average_precision','auroc']:
         draw_boxplot(final_res, outputFolder, title_col, score, x_axis_col)
         
 def plot_yasin_dims(args, experiment_str, outputFolder):
@@ -278,6 +309,7 @@ def plot_yasin_dims_ris(args, experiment_str, outputFolder):
     final_res = pd.concat(res_datasets, ignore_index=True)
     print(final_res.head())
     for score in SCORES.keys():
+        print(score)
         draw_boxplot(final_res, outputFolder, title_col=CONVS[f'{bias}_title'], y_axis_col = score, x_axis_col=target_x_col)
 
 if __name__ == '__main__':

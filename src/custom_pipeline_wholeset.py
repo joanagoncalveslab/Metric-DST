@@ -17,6 +17,9 @@ from sklearn.utils import shuffle
 import collections
 import matplotlib.pyplot as plt
 import pickle as pkl
+from sklearn.semi_supervised import SelfTrainingClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import roc_auc_score, average_precision_score, f1_score, accuracy_score
 
 from pytorch_metric_learning import distances, losses, reducers
 
@@ -38,7 +41,7 @@ if platform.system() == 'Windows':
     outputFolder = config.RESULT_DIR / 'bias' / 'yasin'
 else:
     webDriveFolder = "/home/nfs/ytepeli/python_projects/msc-thesis-2122-mathijs-de-wolf/data"
-    outputFolder = config.RESULT_DIR / 'bias' / 'yasin'
+    outputFolder = config.RESULT_DIR / 'bias' / 'yasin2'
 
 
 def setup_seed(seed):
@@ -61,9 +64,9 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=0.01)
 
-    parser.add_argument("--knn", type=int, default=10)
+    parser.add_argument("--knn", type=int, default=5)
     parser.add_argument("--conf", "-c", type=float, default=0.9)
-    parser.add_argument("--num-pseudolabels", type=int, default=-2)
+    parser.add_argument("--num-pseudolabels", '-np', type=int, default=-2)
 
     parser.add_argument("--retrain", "-rt", action='store_true')
     parser.add_argument("--early_stop_pseudolabeling", "-esp", action='store_true')
@@ -204,9 +207,10 @@ def main_divergence(data_dict, args):
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
         setup_seed(fold)
-        ntwrk = Network([dataset.shape[1]-3,8,2], loss_func, args.lr, device)
+        model_shape = [dataset.shape[1]-3,8,2]
+        ntwrk = Network(model_shape, loss_func, args.lr, device)
         setup_seed(fold)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "diversity", args.knn, args.conf, args.num_pseudolabels)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "diversity", args.knn, args.conf, args.num_pseudolabels, model_shape)
         ml.train(fold, retrain=args.retrain, add_samples_to_convergence=args.early_stop_pseudolabeling, pseudolabel_method='divergence')
         if args.single_fold:
             break
@@ -290,9 +294,10 @@ def main_balanced_semi_supervised(data_dict, args):
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
         setup_seed(fold)
-        ntwrk = Network([dataset.shape[1]-3,8,2], loss_func, args.lr, device)
+        model_shape = [dataset.shape[1]-3,8,2]
+        ntwrk = Network(model_shape, loss_func, args.lr, device)
         setup_seed(fold)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "balanced_semi_supervised", args.knn, args.conf, args.num_pseudolabels)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "balanced_semi_supervised", args.knn, args.conf, args.num_pseudolabels, model_shape)
         ml.train(fold, retrain=args.retrain, add_samples_to_convergence=args.early_stop_pseudolabeling, pseudolabel_method='balanced_semi_supervised')
         if args.single_fold:
             break
@@ -376,14 +381,231 @@ def main_true_semi_supervised(data_dict, args):
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
         setup_seed(fold)
-        ntwrk = Network([dataset.shape[1]-3,8,2], loss_func, args.lr, device)
+        model_shape = [dataset.shape[1]-3,8,2]
+        ntwrk = Network(model_shape, loss_func, args.lr, device)
         setup_seed(fold)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "true_semi_supervised", args.knn, args.conf, args.num_pseudolabels)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "true_semi_supervised", args.knn, args.conf, args.num_pseudolabels, model_shape)
         ml.train(fold, retrain=args.retrain, add_samples_to_convergence=args.early_stop_pseudolabeling, pseudolabel_method='semi_supervised')
         if args.single_fold:
             break
     gc.collect()
     create_convergence_graph.create_fold_convergence_graph(str(outputFolder / "true_semi_supervised_performance.csv"), outputFolder)
+    
+    
+
+def main_knn_semi_supervised(data_dict, args):
+    res_rows = []
+    for fold, fold_dict in data_dict.items():
+        plt.clf()
+        print(f'fold: {fold}')
+
+        X_train, y_train = fold_dict['xs_nobias'].copy(), fold_dict['ys_nobias'].copy()
+        X_b_train, y_b_train = fold_dict['xs'].copy(), fold_dict['ys'].copy()
+        X_unlabeled, y_unlabeled = fold_dict['xg'].copy(), fold_dict['yg'].copy()
+        X_test, y_test = fold_dict['xt'].copy(), fold_dict['yt'].copy()
+        x_ind = fold_dict['chosen_ids']
+        
+        zv_cols = np.var(X_b_train, axis=0)==0 #zero variance columns
+        X_b_train, X_test, X_unlabeled = X_b_train[:, ~zv_cols], X_test[:, ~zv_cols], X_unlabeled[:, ~zv_cols]
+        scaler = preprocessing.StandardScaler().fit(X_b_train)
+        # scaler = MinMaxScaler().fit(x_b_train)
+        X_b_train = scaler.transform(X_b_train)
+        X_test = scaler.transform(X_test)
+        X_unlabeled = scaler.transform(X_unlabeled)
+        
+        dataset = pd.DataFrame(X_b_train)
+        base_gi = 0
+        dataset['gene1'] = [f'gene1_{base_gi+gi}' for gi in range(dataset.shape[0])]
+        dataset['gene2'] = [f'gene2_{base_gi+gi}' for gi in range(dataset.shape[0])]
+        dataset['class'] = y_b_train
+        test_dataset = pd.DataFrame(X_test)
+        base_gi = dataset.shape[1]
+        test_dataset['gene1'] = [f'gene1_{base_gi+gi}' for gi in range(test_dataset.shape[0])]
+        test_dataset['gene2'] = [f'gene2_{base_gi+gi}' for gi in range(test_dataset.shape[0])]
+        test_dataset['class'] = y_test
+        unlabeled_dataset = pd.DataFrame(X_unlabeled)
+        base_gi = test_dataset.shape[1]
+        unlabeled_dataset['gene1'] = [f'gene1_{base_gi+gi}' for gi in range(unlabeled_dataset.shape[0])]
+        unlabeled_dataset['gene2'] = [f'gene2_{base_gi+gi}' for gi in range(unlabeled_dataset.shape[0])]
+        unlabeled_dataset['class'] = y_unlabeled
+
+        # Undersample dataset
+        setup_seed(fold)
+        idx_0 = dataset[dataset['class'] == 0]
+        idx_1 = dataset[dataset['class'] == 1]
+        if 'train' in args.balance:
+            if len(idx_0) < len(idx_1):
+                idx_1 = idx_1.sample(len(idx_0))
+            if len(idx_0) > len(idx_1):
+                idx_0 = idx_0.sample(len(idx_1))
+        # Split dataset in validation and train set
+        partion = round((len(idx_0)+len(idx_1))/10)
+        train_dataset = pd.concat([idx_0.iloc[partion:, :], idx_1.iloc[partion:, :]], ignore_index=True)
+        validation_dataset = pd.concat([idx_0.iloc[:partion, :], idx_1.iloc[:partion, :]], ignore_index=True)
+        # Shuffle datasets, otherwise the first half is negative and the second half is positive
+        setup_seed(fold)
+        train_dataset = train_dataset.sample(frac=1).reset_index(drop=True)
+        setup_seed(fold)
+        validation_dataset = validation_dataset.sample(frac=1).reset_index(drop=True)
+
+        # Undersample test set
+        setup_seed(fold)
+        idx_0 = test_dataset[test_dataset['class'] == 0]
+        idx_1 = test_dataset[test_dataset['class'] == 1]
+        if 'test' in args.balance:
+            if len(idx_0) < len(idx_1):
+                idx_1 = idx_1.sample(len(idx_0))
+            if len(idx_0) > len(idx_1):
+                idx_0 = idx_0.sample(len(idx_1))
+        fold_test_dataset = pd.concat([idx_0, idx_1])
+        setup_seed(fold)
+        fold_test_dataset = fold_test_dataset.sample(frac=1).reset_index(drop=True)
+        
+        print(train_dataset)
+        biased_st_X = train_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        biased_st_y = train_dataset['class'].values
+        
+        unlabeled_st_X = unlabeled_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        unlabeled_st_y = unlabeled_dataset['class'].values
+        unlabeled_st_y[:]=-1
+        print(unlabeled_st_y)
+        
+        validation_st_X = validation_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        validation_st_y = validation_dataset['class'].values
+        
+        fold_test_st_X = fold_test_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        fold_test_st_y = fold_test_dataset['class'].values
+        
+        train_st_X = np.concatenate([biased_st_X, unlabeled_st_X])
+        train_st_y = np.concatenate([biased_st_y, unlabeled_st_y], axis=None)
+        print(biased_st_X.shape)
+        print(train_st_X.shape)
+        print(biased_st_y.shape)
+        print(train_st_y.shape)
+        neigh = KNeighborsClassifier(n_neighbors=args.knn)
+        self_training_model = SelfTrainingClassifier(neigh, criterion='k_best', k_best=args.num_pseudolabels, max_iter=10000)
+        self_training_model.fit(train_st_X, train_st_y)
+        test_probs = self_training_model.predict_proba(fold_test_st_X)[:, 1]
+        test_preds = self_training_model.predict(fold_test_st_X)
+                
+        auroc_test = roc_auc_score(fold_test_st_y, test_probs)
+        auprc_test = average_precision_score(fold_test_st_y, test_probs)
+        f1_test = f1_score(fold_test_st_y, test_preds)
+        acc_test = accuracy_score(fold_test_st_y, test_preds)
+        
+        res_rows.append([fold, 0, acc_test, f1_test, auprc_test, auroc_test])
+        
+    df = pd.DataFrame(res_rows, columns = ['fold','test_loss','accuracy','f1_score','average_precision','auroc'])
+    res_loc = outputFolder / "knn_semi_supervised_test_performance.csv"
+    df.to_csv(res_loc)
+    
+
+    
+
+def main_knn_supervised(data_dict, args):
+    res_rows = []
+    for fold, fold_dict in data_dict.items():
+        plt.clf()
+        print(f'fold: {fold}')
+
+        X_train, y_train = fold_dict['xs_nobias'].copy(), fold_dict['ys_nobias'].copy()
+        X_b_train, y_b_train = fold_dict['xs'].copy(), fold_dict['ys'].copy()
+        X_unlabeled, y_unlabeled = fold_dict['xg'].copy(), fold_dict['yg'].copy()
+        X_test, y_test = fold_dict['xt'].copy(), fold_dict['yt'].copy()
+        x_ind = fold_dict['chosen_ids']
+        
+        zv_cols = np.var(X_b_train, axis=0)==0 #zero variance columns
+        X_b_train, X_test, X_unlabeled = X_b_train[:, ~zv_cols], X_test[:, ~zv_cols], X_unlabeled[:, ~zv_cols]
+        scaler = preprocessing.StandardScaler().fit(X_b_train)
+        # scaler = MinMaxScaler().fit(x_b_train)
+        X_b_train = scaler.transform(X_b_train)
+        X_test = scaler.transform(X_test)
+        X_unlabeled = scaler.transform(X_unlabeled)
+        
+        dataset = pd.DataFrame(X_b_train)
+        base_gi = 0
+        dataset['gene1'] = [f'gene1_{base_gi+gi}' for gi in range(dataset.shape[0])]
+        dataset['gene2'] = [f'gene2_{base_gi+gi}' for gi in range(dataset.shape[0])]
+        dataset['class'] = y_b_train
+        test_dataset = pd.DataFrame(X_test)
+        base_gi = dataset.shape[1]
+        test_dataset['gene1'] = [f'gene1_{base_gi+gi}' for gi in range(test_dataset.shape[0])]
+        test_dataset['gene2'] = [f'gene2_{base_gi+gi}' for gi in range(test_dataset.shape[0])]
+        test_dataset['class'] = y_test
+        unlabeled_dataset = pd.DataFrame(X_unlabeled)
+        base_gi = test_dataset.shape[1]
+        unlabeled_dataset['gene1'] = [f'gene1_{base_gi+gi}' for gi in range(unlabeled_dataset.shape[0])]
+        unlabeled_dataset['gene2'] = [f'gene2_{base_gi+gi}' for gi in range(unlabeled_dataset.shape[0])]
+        unlabeled_dataset['class'] = y_unlabeled
+
+        # Undersample dataset
+        setup_seed(fold)
+        idx_0 = dataset[dataset['class'] == 0]
+        idx_1 = dataset[dataset['class'] == 1]
+        if 'train' in args.balance:
+            if len(idx_0) < len(idx_1):
+                idx_1 = idx_1.sample(len(idx_0))
+            if len(idx_0) > len(idx_1):
+                idx_0 = idx_0.sample(len(idx_1))
+        # Split dataset in validation and train set
+        partion = round((len(idx_0)+len(idx_1))/10)
+        train_dataset = pd.concat([idx_0.iloc[partion:, :], idx_1.iloc[partion:, :]], ignore_index=True)
+        validation_dataset = pd.concat([idx_0.iloc[:partion, :], idx_1.iloc[:partion, :]], ignore_index=True)
+        # Shuffle datasets, otherwise the first half is negative and the second half is positive
+        setup_seed(fold)
+        train_dataset = train_dataset.sample(frac=1).reset_index(drop=True)
+        setup_seed(fold)
+        validation_dataset = validation_dataset.sample(frac=1).reset_index(drop=True)
+
+        # Undersample test set
+        setup_seed(fold)
+        idx_0 = test_dataset[test_dataset['class'] == 0]
+        idx_1 = test_dataset[test_dataset['class'] == 1]
+        if 'test' in args.balance:
+            if len(idx_0) < len(idx_1):
+                idx_1 = idx_1.sample(len(idx_0))
+            if len(idx_0) > len(idx_1):
+                idx_0 = idx_0.sample(len(idx_1))
+        fold_test_dataset = pd.concat([idx_0, idx_1])
+        setup_seed(fold)
+        fold_test_dataset = fold_test_dataset.sample(frac=1).reset_index(drop=True)
+        
+        print(train_dataset)
+        biased_st_X = train_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        biased_st_y = train_dataset['class'].values
+        
+        unlabeled_st_X = unlabeled_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        unlabeled_st_y = unlabeled_dataset['class'].values
+        unlabeled_st_y[:]=-1
+        print(unlabeled_st_y)
+        
+        validation_st_X = validation_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        validation_st_y = validation_dataset['class'].values
+        
+        fold_test_st_X = fold_test_dataset.drop(columns=['gene1', 'gene2', 'class']).values
+        fold_test_st_y = fold_test_dataset['class'].values
+        
+        train_st_X = np.concatenate([biased_st_X, unlabeled_st_X])
+        train_st_y = np.concatenate([biased_st_y, unlabeled_st_y], axis=None)
+        print(biased_st_X.shape)
+        print(train_st_X.shape)
+        print(biased_st_y.shape)
+        print(train_st_y.shape)
+        neigh = KNeighborsClassifier(n_neighbors=args.knn)
+        neigh.fit(biased_st_X, biased_st_y)
+        test_probs = neigh.predict_proba(fold_test_st_X)[:, 1]
+        test_preds = neigh.predict(fold_test_st_X)
+                
+        auroc_test = roc_auc_score(fold_test_st_y, test_probs)
+        auprc_test = average_precision_score(fold_test_st_y, test_probs)
+        f1_test = f1_score(fold_test_st_y, test_preds)
+        acc_test = accuracy_score(fold_test_st_y, test_preds)
+        
+        res_rows.append([fold, 0, acc_test, f1_test, auprc_test, auroc_test])
+        
+    df = pd.DataFrame(res_rows, columns = ['fold','test_loss','accuracy','f1_score','average_precision','auroc'])
+    res_loc = outputFolder / "knn_supervised_test_performance.csv"
+    df.to_csv(res_loc)
 
 def main_supervised(data_dict, args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -460,11 +682,11 @@ def main_supervised(data_dict, args):
         fold_test_dataset = fold_test_dataset.sample(frac=1).reset_index(drop=True)
 
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
-
         setup_seed(fold)
-        ntwrk = Network([dataset.shape[1]-3,8,2], loss_func, args.lr, device)
+        model_shape = [dataset.shape[1]-3,8,2]
+        ntwrk = Network(model_shape, loss_func, args.lr, device)
         setup_seed(fold)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "supervised", args.knn, args.conf, args.num_pseudolabels)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "supervised", args.knn, args.conf, args.num_pseudolabels, model_shape)
         ml.train(fold, supervised=True)
         if args.single_fold:
             break
@@ -548,9 +770,10 @@ def main_supervised_none(data_dict, args):
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
         setup_seed(fold)
-        ntwrk = Network([dataset.shape[1]-3,8,2], loss_func, args.lr, device)
+        model_shape = [dataset.shape[1]-3,8,2]
+        ntwrk = Network(model_shape, loss_func, args.lr, device)
         setup_seed(fold)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "supervised_none", args.knn, args.conf, args.num_pseudolabels)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "supervised_none", args.knn, args.conf, args.num_pseudolabels, model_shape)
         ml.train(fold, supervised=True)
         if args.single_fold:
             break
@@ -634,9 +857,10 @@ def main_supervised_random(data_dict, args):
         loss_func = losses.ContrastiveLoss(pos_margin=0.3, neg_margin=0.5, distance=distance, reducer=reducer)
 
         setup_seed(fold)
-        ntwrk = Network([dataset.shape[1]-3,8,2], loss_func, args.lr, device)
+        model_shape = [dataset.shape[1]-3,8,2]
+        ntwrk = Network(model_shape, loss_func, args.lr, device)
         setup_seed(fold)
-        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "supervised_random", args.knn, args.conf, args.num_pseudolabels)
+        ml = SelfTraining(ntwrk, fold_test_dataset, train_dataset, unlabeled_dataset, validation_dataset, str(outputFolder)+'/', "supervised_random", args.knn, args.conf, args.num_pseudolabels, model_shape)
         ml.train(fold, supervised=True)
         if args.single_fold:
             break
@@ -737,9 +961,9 @@ if __name__ == '__main__':
     while args.conf > 1:
         args.conf = args.conf / 10
 
-    if args.num_pseudolabels < -2:
+    if args.num_pseudolabels <= -2:
         provisional_no = np.power(potential_bias_size, -1/args.num_pseudolabels) 
-        args.num_pseudolabels = provisional_no - provisional_no%2 
+        args.num_pseudolabels = int(provisional_no - provisional_no%2)
     
     with open(outputFolder / 'settings.txt', 'a+') as f:
         f.write('\n'.join([
@@ -758,7 +982,7 @@ if __name__ == '__main__':
             'add pseudolabels until convergence: '+str(args.early_stop_pseudolabeling),
             f'bias: {bias}',
             f'args: {args}',
-            'Note: This is biased by DBaST. CV is used.'
+            'Note: This is biased by DBAST. CV is used.'
             ''
         ]))
 
@@ -827,10 +1051,10 @@ if __name__ == '__main__':
         except Exception as e:
             print(f'supervised could not run! Exception {e} occured!')
     if args.model == 'diversity' or args.model == 'all':
-        try:
-            main_divergence(fold_dict, args)
-        except Exception as e:
-            print(f'diversity could not run! Exception {e} occured!')
+        #try:
+        main_divergence(fold_dict, args)
+        #except Exception as e:
+        #    print(f'diversity could not run! Exception {e} occured!')
     if args.model == 'true_semi_supervised' or args.model == 'all':
         try:
             main_true_semi_supervised(fold_dict, args)
@@ -841,6 +1065,16 @@ if __name__ == '__main__':
             main_balanced_semi_supervised(fold_dict, args)
         except Exception as e:
             print(f'balanced_semi_supervised could not run! Exception {e} occured!')
+    if args.model == 'knn_semisupervised' or args.model == 'all':
+        #try:
+        main_knn_semi_supervised(fold_dict, args)
+        #except Exception as e:
+        #    print(f'knn_semi_supervised could not run! Exception {e} occured!')
+    if args.model == 'knn_supervised' or args.model == 'all':
+        #try:
+        main_knn_supervised(fold_dict, args)
+        #except Exception as e:
+        #    print(f'knn_semi_supervised could not run! Exception {e} occured!')
     if args.model == 'nobias' or args.model == 'all' or args.model == 'comparison':
         try:
             main_supervised_none(fold_dict, args)
