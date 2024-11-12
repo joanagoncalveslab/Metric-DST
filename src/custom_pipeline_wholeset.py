@@ -36,7 +36,7 @@ from src.andrei import dataset_generator as a_dg
 from src.custom import dataset_generator as c_dg
 from src.dbast import load_dataset as y_dg
 
-outputFolder = config.RESULT_DIR / 'bias' / 'yasin2'
+outputFolder = config.RESULT_DIR / 'bias' / 'final_results'
 
 
 def setup_seed(seed):
