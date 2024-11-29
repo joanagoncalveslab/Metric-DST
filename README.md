@@ -3,7 +3,7 @@
   <a href="https://github.com/joanagoncalveslab/Metric-DST/archive/refs/heads/public.zip">Metric-DST</a>
 </h1> 
 
-<h4 align="center">Diverse Self-training via Metric Learning</h4>
+<h4 align="center">Mitigating Selection Bias Through Diversity-Guided Semi-Supervised Metric Learning</h4>
 
 <p>
     <a href="https://github.com/joanagoncalveslab/Metric-DST/commits/public/">
@@ -40,10 +40,11 @@
 <table>
 <tr>
 <td>
-  
-In XXX on XXX: <a href="https://google.com">Metric-DST</a>.
+Selection bias poses a critical challenge for fairness in machine learning, as models trained on data that is less representative of the population might exhibit undesirable behavior for underrepresented profiles. Semi-supervised learning strategies like self-training can mitigate selection bias by incorporating unlabeled data into model training to gain further insight into the distribution of the population. However, conventional self-training seeks to include high-confidence data samples, which may reinforce existing model bias and compromise effectiveness. We propose Metric-DST, a diversity-guided self-training strategy that leverages metric learning and its implicit embedding space to counter confidence-based bias through the inclusion of more diverse samples. Metric-DST learned more robust models in the presence of selection bias for generated and real-world datasets with induced bias, as well as a molecular biology prediction task with intrinsic bias. The Metric-DST learning strategy offers a flexible and widely applicable solution to mitigate selection bias and enhance fairness of machine learning models.
 
-An earlier preprint appeared in <a href="https://doi.org/10.1101/2022.09.19.508413">bioRxiv</a> on 19 Sep 2022.
+Submitted: <a href="https://doi.org/10.48550/arXiv.2411.18442">Metric-DST</a>.
+
+An earlier preprint appeared in <a href="https://doi.org/10.48550/arXiv.2411.184423">arXiv</a> on 27 Nov 2024.
 
 </td>
 </tr>
@@ -51,9 +52,8 @@ An earlier preprint appeared in <a href="https://doi.org/10.1101/2022.09.19.5084
 
 
 ## Framework
-![Framework](fig0.png "Framework")
-*Metric-DST framework.*  
-The Metric-DST framework: 
+![Framework](fig_Metric-DST.png "Framework")
+**Overview of the Metric-DST methodology**. A Metric-DST iteration encompasses 1) training a metric learning model on labeled data that can be used to transform both labeled and unlabeled samples into an embedding space, 2) obtaining predicted pseudo-labels and model confidence values for unlabeled samples using k-nearest neighbors (kNN) on the embedding space representations, 3) selecting diverse pseudo-labeled samples distributed across the learned embedding space and adding them to the labeled set for the subsequent iteration.
 
 
 ## Repository Description
@@ -206,14 +206,12 @@ python3 src/custom_pipeline_wholeset.py -rt -esp -m all -b 'delta_50|2|0,0|0,0' 
 python3 src/custom_pipeline_wholeset.py -rt -esp -m all -b 'delta_100|2|0,0|0,0' -d moon_2000
 ```
 
-## Code Integration
-
 
 # Bibtex-Reference
 ```
 @article{Tepeli2023metricdst,
     author = {Tepeli, Yasin I and de Wolf, Mathijs and Gonçalves, Joana P},
-    title = {{Mitigating Selection Bias Through Diversity-guided Semi Supervised Metric Learning}},
+    title = {{Metric-DST: Mitigating Selection Bias Through Diversity-Guided Semi-Supervised Metric Learning}},
     journal = {TBD},
     volume = {TBD},
     number = {TBD},
